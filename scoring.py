@@ -1,8 +1,10 @@
 """
 Turning two numbers into one, and one number into something a person can read.
-← YOU BUILD THIS IN MILESTONES 4 AND 5
+Built in Milestones 4 and 5.
 
-Two functions live here, and both are stubs.
+Two functions do the deciding — `combine_signals` and `score_to_label` — with
+`confidence` beside them. Thresholds and weights come from config.py and are
+provisional: calibration is incomplete.
 
 `combine_signals` is where your false-positive decision from Milestone 1
 actually gets made. Everything above it — the labels, the appeal path — is
@@ -105,10 +107,58 @@ def combine_signals(model_score: float, style_score: float) -> float:
     return round(min(max(combined, 0.0), 1.0), 4)
 
 
+def confidence(combined_score: float) -> float:
+    """
+    How far the combined score sits from a coin flip, on 0–1:
+
+        round(abs(combined_score − 0.5) × 2, 2)
+
+    0.0 at 0.5, 1.0 at either end, and at most 0.30 anywhere in the unsure
+    band (0.35–0.65).
+
+    ⚠️ **An uncalibrated, score-based indicator — not a probability that the
+    guess is correct.** Nothing has measured how often a 0.8 turns out right,
+    so it must never be shown to a writer as "80% sure".
+
+    Invalid scores are refused exactly as in `combine_signals` and
+    `score_to_label`.
+    """
+    combined_score = _check_score("combined_score", combined_score)
+    return round(abs(combined_score - 0.5) * 2, 2)
+
+
+LABEL_HUMAN = (
+    "This text shows patterns more consistent with human writing. "
+    "This is an automated estimate, not proof of authorship."
+)
+LABEL_UNSURE = (
+    "The available signals do not support a reliable classification. "
+    "No conclusion about authorship should be drawn from this result."
+)
+LABEL_AI = (
+    "This text shows patterns associated with AI-generated writing. "
+    "This result is not proof of AI use, and you can request a human review "
+    "if you disagree."
+)
+
+
 def score_to_label(score: float) -> tuple[str, str]:
     """
     Turn a score into a guess and the text a reader actually sees.
-    ← TODO (Milestone 5)
+
+    **The bands** (thresholds from config.py, provisional — calibration is
+    incomplete):
+
+        score <  HUMAN_THRESHOLD (0.35)   -> "human"
+        0.35 <= score <= 0.65             -> "unsure"
+        score >  AI_THRESHOLD (0.65)      -> "ai"
+
+    A score exactly on either threshold is "unsure": a score sitting on the
+    line between two labels doesn't earn a confident one.
+
+    Invalid scores are refused the same way `combine_signals` refuses its
+    inputs: outside 0–1, NaN or infinite raises ValueError; a non-number
+    (including True/False) raises TypeError.
 
     Returns:
         (guess, label_text) — where `guess` is a short machine-readable string
@@ -131,12 +181,12 @@ def score_to_label(score: float) -> tuple[str, str]:
     think if they got it on their own work. That question is the whole
     milestone.
     """
-    # TODO: replace this — thresholds are in config.py
-    if score >= config.AI_THRESHOLD:
-        return "ai", "PLACEHOLDER — write the high-confidence AI label."
-    if score <= config.HUMAN_THRESHOLD:
-        return "human", "PLACEHOLDER — write the high-confidence human label."
-    return "unsure", "PLACEHOLDER — write the unsure label."
+    score = _check_score("score", score)
+    if score < config.HUMAN_THRESHOLD:
+        return "human", LABEL_HUMAN
+    if score > config.AI_THRESHOLD:
+        return "ai", LABEL_AI
+    return "unsure", LABEL_UNSURE
 
 
 def label_ranges() -> list[tuple[str, str]]:

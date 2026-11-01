@@ -18,12 +18,13 @@ doesn't, it's the service itself.
 Routes:
 
     POST /ping        the worked example. Already works. Don't edit it
-    POST /submit      ← YOU BUILD THIS (Milestone 3, 4, 5)
-    POST /appeal      ← YOU BUILD THIS (Milestone 5)
+    POST /submit      score a piece of text, label it, log it (Milestones 3–5)
+    POST /appeal      a writer contests a decision (Milestone 5)
     GET  /log         the audit log. Already works
     GET  /health      is the service up, and is the model loaded
 """
 
+import threading
 import uuid
 
 from flask import Flask, jsonify, request
@@ -151,14 +152,13 @@ def health():
     })
 
 
-# ── YOU BUILD THIS ────────────────────────────────────────────────────────────
+# ── Submissions and appeals (Milestones 3–5) ─────────────────────────────────
 
 @app.post("/submit")
 # @limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
 def submit():
     """
     Take a piece of text, decide about it, log the decision, answer.
-    ← TODO — Milestones 3, 4 and 5
 
     Expects JSON:
         {"text": "...", "creator_id": "..."}
@@ -248,12 +248,12 @@ def submit():
 
     style_score = stylometry.style_signal(text)
     combined_score = scoring.combine_signals(model_score, style_score)
+    guess, label = scoring.score_to_label(combined_score)
 
-    # guess, confidence and label are still placeholders — Milestone 5.
     return _decide(creator_id, text, {
-        "guess": "unsure",
-        "confidence": 0.0,
-        "label": "PLACEHOLDER — labels are written in Milestone 5.",
+        "guess": guess,
+        "confidence": scoring.confidence(combined_score),
+        "label": label,
         "model_score": model_score,
         "style_score": style_score,
         "combined_score": combined_score,
@@ -266,7 +266,8 @@ def _decide(creator_id, text, decision, **extra):
 
     The response and the log entry are built from the same values, so the
     content_id a writer is handed is always one /appeal can find. The text
-    itself isn't logged, only its length.
+    itself isn't logged, only its length. `confidence` isn't one of the nine
+    audit fields, so it's logged as an extra beside them.
     """
     content_id = str(uuid.uuid4())
     audit.log_decision(
@@ -278,6 +279,7 @@ def _decide(creator_id, text, decision, **extra):
         combined_score=decision["combined_score"],
         label=decision["label"],
         status="decided",
+        confidence=decision["confidence"],
         text_length=len(text),
         **extra,
     )
@@ -294,7 +296,7 @@ def _decide(creator_id, text, decision, **extra):
     })
 
 
-def _reject(status, error, field, message, payload):
+def _reject(status, error, field, message, payload, **extra):
     """
     Refuse a request, and leave a trace of it.
 
@@ -307,38 +309,150 @@ def _reject(status, error, field, message, payload):
         reason=error,
         field=field,
         http_status=status,
+        **extra,
     )
     return jsonify({"error": error, "field": field, "message": message}), status
+
+
+# Held across "is it already under review?" and "record the appeal", so two
+# appeals for the same item arriving together can't both see `decided` and
+# both get recorded. Flask's server is threaded, so that race is real.
+#
+# ⚠️ One process only. A threading.Lock is invisible to other processes — run
+# several gunicorn workers and each has its own lock, and the race is back.
+# That would need a file lock or a database transaction instead.
+_APPEAL_LOCK = threading.Lock()
 
 
 @app.post("/appeal")
 def appeal():
     """
-    A writer says you got it wrong. ← TODO — Milestone 5
+    A writer says you got it wrong.
 
     Expects JSON:
-        {"content_id": "...", "reasoning": "..."}
+        {"content_id": "...", "reasoning": "...", "creator_id": "..." (optional)}
 
-    Should:
-      1. Check the content_id actually exists — `audit.entries_for(id)` tells
-         you. A typo here fails silently and looks like a broken endpoint,
-         which is the single most common way this milestone eats an hour.
-      2. Record the appeal with `audit.log_appeal(...)`, which moves the item
-         to `under_review`.
-      3. Confirm to the writer. No automatic re-checking needed.
+    What it does (the contract is in DESIGN.md):
+      1. Validates the body — a JSON object, a non-empty `content_id`, a
+         non-empty `reasoning` of at most MAX_REASONING_CHARS, and, if sent,
+         a non-empty `creator_id`. Otherwise 400 `invalid_input`.
+      2. Finds the original decision with `audit.entries_for(id)` — only a
+         decision entry counts. None: 404 `unknown_content_id`, so a typo
+         fails loudly instead of silently.
+      3. If `creator_id` was sent and isn't the original submitter's: 403
+         `creator_mismatch`. If it was left out, the original one is used.
+      4. If the item is already `under_review` — an appeal is on record — 409
+         `already_under_review`. One appeal per item: nothing new is appended,
+         and the first appeal stands. The message reassures rather than
+         blames; sending twice isn't the writer's mistake. The check and the
+         append share `_APPEAL_LOCK`, so this holds even for simultaneous
+         requests — within one process.
+      5. Otherwise records the appeal with `audit.log_appeal(...)` — appended
+         after the decision, which is never touched — moving the item to
+         `under_review`.
+      6. Answers 200 with the new status, the previous one, the original
+         guess, and when the appeal was recorded.
+
+    Every refusal is logged with `log_rejection`. Nothing is re-scored: the
+    appeal goes to a person.
 
     This is the smallest endpoint in the project and the one that matters most
     to the person on the other end. It's the only thing standing between a
     wrong accusation and nothing at all.
     """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
 
-    # TODO: delete this and build the route.
+    def refuse(status, error, field, message):
+        # The id the writer tried goes under its own key: a rejection never
+        # carries `content_id`, so entries_for() can't mistake it for a decision.
+        attempted = payload.get("content_id") if isinstance(payload, dict) else None
+        extra = {"endpoint": "/appeal"}
+        if isinstance(attempted, str):
+            extra["attempted_content_id"] = attempted[:100]
+        return _reject(status, error, field, message, payload, **extra)
+
+    if not isinstance(payload, dict):
+        return refuse(400, "invalid_input", None,
+                      "Send a JSON object with \"content_id\" and \"reasoning\".")
+
+    content_id = payload.get("content_id")
+    reasoning = payload.get("reasoning")
+    creator_id = payload.get("creator_id")
+
+    if not isinstance(content_id, str) or not content_id.strip():
+        return refuse(400, "invalid_input", "content_id",
+                      "\"content_id\" must be the non-empty id from your result.")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return refuse(400, "invalid_input", "reasoning",
+                      "Please tell us why you think the result is wrong.")
+    if len(reasoning) > config.MAX_REASONING_CHARS:
+        return refuse(400, "invalid_input", "reasoning",
+                      f"Please keep your reasoning under {config.MAX_REASONING_CHARS:,} "
+                      f"characters.")
+    # Optional — but if it's sent, it has to be a real id.
+    if creator_id is not None and (not isinstance(creator_id, str) or not creator_id.strip()):
+        return refuse(400, "invalid_input", "creator_id",
+                      "\"creator_id\" is optional, but if you send it, it must be a "
+                      "non-empty string.")
+
+    decision = _find_decision(content_id)
+    if decision is None:
+        return refuse(404, "unknown_content_id", "content_id",
+                      "We couldn't find a result with that content_id. Please check it "
+                      "matches the one in your result exactly.")
+
+    original_creator = decision["creator_id"]
+    if creator_id is not None and creator_id != original_creator:
+        return refuse(403, "creator_mismatch", "creator_id",
+                      "That creator_id doesn't match the one this text was submitted "
+                      "under. Only the original submitter can appeal it.")
+
+    # The check and the append happen under one lock — see _APPEAL_LOCK.
+    with _APPEAL_LOCK:
+        previous_status = _current_status(content_id)
+        entry = None
+        if previous_status != "under_review":
+            entry = audit.log_appeal(content_id, original_creator, reasoning)
+
+    if entry is None:
+        return refuse(409, "already_under_review", "content_id",
+                      "Your appeal for this result is already recorded and waiting for "
+                      "a person to review it. You don't need to send it again.")
+
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /appeal isn't built yet — see the TODO in app.py.",
-        "you_sent": payload,
-    }), 501
+        "content_id": content_id,
+        "status": entry["status"],
+        "previous_status": previous_status,
+        "original_guess": decision["guess"],
+        "message": "Thanks — your appeal is recorded and a person will review this "
+                   "decision. The original label is paused while they do.",
+        "appealed_at": entry["timestamp"],
+    })
+
+
+def _find_decision(content_id):
+    """
+    The original decision for a content_id, or None.
+
+    Only a decision counts — an entry from log_decision, which has no "event".
+    Appeal and rejection entries are ignored even if they carry the same id.
+    """
+    for entry in audit.entries_for(content_id):
+        if "event" not in entry:
+            return entry
+    return None
+
+
+def _current_status(content_id):
+    """
+    Where an item stands now: the status on its latest decision or appeal
+    entry. The log is append-only, so the newest entry wins.
+    """
+    status = None
+    for entry in audit.entries_for(content_id):
+        if "event" not in entry or entry.get("event") == "appeal":
+            status = entry["status"]
+    return status
 
 
 # ── Already works ─────────────────────────────────────────────────────────────

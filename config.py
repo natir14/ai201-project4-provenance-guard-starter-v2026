@@ -56,6 +56,9 @@ MAX_TEXT_CHARS = 20_000
 MIN_WORDS_TO_ASSESS = 50
 MIN_SENTENCES_TO_ASSESS = 3
 
+# The longest `reasoning` /appeal accepts — see DESIGN.md.
+MAX_REASONING_CHARS = 2_000
+
 
 # ─── Scoring (Milestone 4) ───────────────────────────────────────────────────
 # How much each signal counts toward the combined score.
@@ -109,15 +112,21 @@ STYLE_WEIGHT_PUNCTUATION = 0.00
 HUMAN_THRESHOLD = 0.35
 AI_THRESHOLD = 0.65
 
-# ⚠️ One thing that catches people out in Milestone 5. A weighted average can
-# only land between its two inputs — so while `style_signal` is still the stub
-# returning 0.5, the combined score can never leave 0.25–0.75 no matter what
-# the model signal says, and the human label needs a model score below 0.20 to
-# be reachable at all.
+# Exactly 0.35 or exactly 0.65 is "unsure" — see scoring.score_to_label.
 #
-# If a label you can't reach is the problem, the fix is upstream of the
-# thresholds: a style signal that actually varies. `scoring.label_ranges()`
-# prints the bands; the reachable range is a different question.
+# ⚠️ Reachability. The combined score is a weighted average, and an average
+# can only land between its two inputs. The style signal now varies (it is no
+# longer the 0.5 stub), so all three labels are reachable in principle — but
+# with weights 0.5 / 0.5:
+#
+#   - "human" needs model_score + style_score < 0.70: BOTH signals fairly low.
+#   - "ai" needs model_score + style_score > 1.30: BOTH signals fairly high.
+#
+# One signal alone can't produce a confident label; if they disagree the
+# result is "unsure". Whether real text actually lands in each band is NOT yet
+# shown — calibration is incomplete (see STYLE_* above). Criterion 3 tests it.
+# `scoring.label_ranges()` prints the bands; the reachable range is a
+# different question.
 
 
 # ─── Rate limiting (UNIT 8) ──────────────────────────────────────────────────

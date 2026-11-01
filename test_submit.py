@@ -96,11 +96,16 @@ class ScoredSubmission(SubmitTestCase):
         self.assertEqual(body["combined_score"], expected)
         self.assertNotEqual(body["combined_score"], 0.5)     # no longer the placeholder
 
-    def test_placeholders_untouched(self):
+    def test_label_and_confidence_come_from_combined_score(self):
+        # Mocked model 0.6123 + real style 0.3737 -> combined 0.493 -> unsure, 0.01
         body = self.submit({"text": LONG, "creator_id": "it_long"}).get_json()
+        self.assertEqual(body["combined_score"], 0.493)
+        self.assertEqual((body["guess"], body["label"]),
+                         scoring.score_to_label(body["combined_score"]))
         self.assertEqual(body["guess"], "unsure")
-        self.assertEqual(body["confidence"], 0.0)
-        self.assertTrue(body["label"].startswith("PLACEHOLDER"))
+        self.assertEqual(body["label"], scoring.LABEL_UNSURE)
+        self.assertEqual(body["confidence"], 0.01)
+        self.assertNotIn("PLACEHOLDER", body["label"])
 
     def test_audit_record_matches_response(self):
         body = self.submit({"text": LONG, "creator_id": "it_long"}).get_json()
@@ -111,7 +116,7 @@ class ScoredSubmission(SubmitTestCase):
         for field in NINE_FIELDS:
             self.assertIn(field, record)
         for field in ["content_id", "creator_id", "guess", "model_score",
-                      "style_score", "combined_score", "label", "status"]:
+                      "style_score", "combined_score", "label", "status", "confidence"]:
             self.assertEqual(record[field], body[field], field)
         self.assertEqual(record["text_length"], len(LONG))
         self.assertNotIn("text", record)
@@ -140,6 +145,10 @@ class ShortText(SubmitTestCase):
         self.assertEqual(record["content_id"], body["content_id"])
         self.assertEqual(record["guess"], "insufficient_evidence")
         self.assertIsNone(record["style_score"])
+        self.assertIsNone(record["confidence"])
+        self.assertEqual(record["label"], body["label"])
+        self.assertNotIn(body["label"], (scoring.LABEL_HUMAN, scoring.LABEL_UNSURE,
+                                         scoring.LABEL_AI))
 
 
 class InvalidInput(SubmitTestCase):
@@ -230,6 +239,70 @@ class MinimumSentences(SubmitTestCase):
         body = self.submit({"text": text, "creator_id": "it_three"}).get_json()
         self.assertNotEqual(body["guess"], "insufficient_evidence")
         self.model.assert_called_once()
+
+
+class Classification(SubmitTestCase):
+    """
+    guess, label and confidence through the real route, with BOTH signals
+    pinned (model mocked, style forced to 0.4) so each combined score is
+    exact: combined = (model + 0.4) / 2.
+    """
+
+    STYLE = 0.4
+
+    def setUp(self):
+        super().setUp()
+        self.style.return_value = self.STYLE     # an explicit return_value overrides wraps
+
+    def submit_with_model(self, model_score, creator_id="it_band"):
+        self.model.return_value = model_score
+        return self.submit({"text": LONG, "creator_id": creator_id}).get_json()
+
+    def assert_decision(self, body, guess, label, combined, confidence):
+        self.assertEqual(body["combined_score"], combined)
+        self.assertEqual(body["guess"], guess)
+        self.assertEqual(body["label"], label)
+        self.assertEqual(body["confidence"], confidence)
+        self.assertEqual(body["style_score"], self.STYLE)
+
+    def test_human(self):
+        body = self.submit_with_model(0.10)            # (0.10 + 0.4) / 2 = 0.25
+        self.assert_decision(body, "human", scoring.LABEL_HUMAN, 0.25, 0.5)
+
+    def test_unsure(self):
+        body = self.submit_with_model(0.60)            # 0.50
+        self.assert_decision(body, "unsure", scoring.LABEL_UNSURE, 0.5, 0.0)
+
+    def test_ai(self):
+        body = self.submit_with_model(1.00)            # 0.70
+        self.assert_decision(body, "ai", scoring.LABEL_AI, 0.7, 0.4)
+
+    def test_exact_boundaries_are_unsure(self):
+        low = self.submit_with_model(0.30, "it_low")   # exactly 0.35
+        high = self.submit_with_model(0.90, "it_high") # exactly 0.65
+        self.assert_decision(low, "unsure", scoring.LABEL_UNSURE, 0.35, 0.3)
+        self.assert_decision(high, "unsure", scoring.LABEL_UNSURE, 0.65, 0.3)
+
+    def test_just_past_each_boundary(self):
+        human = self.submit_with_model(0.2998, "it_h")  # 0.3499
+        ai = self.submit_with_model(0.9002, "it_a")     # 0.6501
+        self.assert_decision(human, "human", scoring.LABEL_HUMAN, 0.3499, 0.3)
+        self.assert_decision(ai, "ai", scoring.LABEL_AI, 0.6501, 0.3)
+
+    def test_confidence_is_rounded_to_two_places(self):
+        body = self.submit_with_model(0.9246)           # 0.6623 -> |0.1623| * 2 = 0.3246
+        self.assertEqual(body["combined_score"], 0.6623)
+        self.assertEqual(body["confidence"], 0.32)
+
+    def test_every_band_logged_exactly_as_returned(self):
+        bodies = [self.submit_with_model(m, f"it_{m}") for m in (0.10, 0.30, 0.60, 0.90, 1.00)]
+        records = {e["content_id"]: e for e in self.decisions()}
+        self.assertEqual(len(records), 5)
+        for body in bodies:
+            record = records[body["content_id"]]
+            for field in ("guess", "label", "confidence", "combined_score",
+                          "model_score", "style_score", "creator_id", "status"):
+                self.assertEqual(record[field], body[field], field)
 
 
 class RealLogUntouched(SubmitTestCase):
