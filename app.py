@@ -30,6 +30,8 @@ from flask import Flask, jsonify, request
 
 import audit
 import config
+import detector
+import stylometry
 
 app = Flask(__name__)
 
@@ -199,17 +201,111 @@ def submit():
     what should this do when `text` is missing, empty, or enormous? A crash on
     a malformed input is one of the most common real failures there is.
     """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
 
-    # TODO: delete this and build the route.
+    # A bare list or string parses as JSON but has no .get — refuse it here
+    # rather than let it become a 500 further down.
+    if not isinstance(payload, dict):
+        return _reject(400, "invalid_input", None,
+                       "Send a JSON object with \"text\" and \"creator_id\".", payload)
+
+    text = payload.get("text")
+    creator_id = payload.get("creator_id")
+
+    if not isinstance(text, str) or not text.strip():
+        return _reject(400, "invalid_input", "text",
+                       "\"text\" must be a non-empty string.", payload)
+    if not isinstance(creator_id, str) or not creator_id.strip():
+        return _reject(400, "invalid_input", "creator_id",
+                       "\"creator_id\" must be a non-empty string.", payload)
+    if len(text) > config.MAX_TEXT_CHARS:
+        return _reject(413, "too_long", "text",
+                       f"Text is longer than {config.MAX_TEXT_CHARS:,} characters. "
+                       f"Please submit a shorter piece.", payload)
+
+    # Too short to judge isn't suspicious and isn't an error: say so, run no
+    # signal, and make no claim either way.
+    if (len(stylometry.words(text)) < config.MIN_WORDS_TO_ASSESS
+            or len(stylometry.sentences(text)) < config.MIN_SENTENCES_TO_ASSESS):
+        return _decide(creator_id, text, {
+            "guess": "insufficient_evidence",
+            "confidence": None,
+            "label": "This piece is too short for us to assess, so we haven't "
+                     "made any judgment about it.",
+            "model_score": None,
+            "style_score": None,
+            "combined_score": None,
+        }, reason="too_short_to_assess")
+
+    # No model, no label — never fall back to a made-up score.
+    try:
+        model_score = detector.model_signal(text)
+    except detector.DetectorUnavailable:
+        return _reject(503, "detector_unavailable", None,
+                       "The checker isn't available right now, so nothing was "
+                       "decided about your text. Please try again later.", payload)
+
+    # style_score, combined_score, guess, confidence and label are still
+    # placeholders — Milestones 4 and 5 fill them in.
+    return _decide(creator_id, text, {
+        "guess": "unsure",
+        "confidence": 0.0,
+        "label": "PLACEHOLDER — labels are written in Milestone 5.",
+        "model_score": model_score,
+        "style_score": 0.5,
+        "combined_score": 0.5,
+    })
+
+
+def _decide(creator_id, text, decision, **extra):
+    """
+    Give a submission its id, log the decision, and answer with it.
+
+    The response and the log entry are built from the same values, so the
+    content_id a writer is handed is always one /appeal can find. The text
+    itself isn't logged, only its length.
+    """
+    content_id = str(uuid.uuid4())
+    audit.log_decision(
+        content_id=content_id,
+        creator_id=creator_id,
+        guess=decision["guess"],
+        model_score=decision["model_score"],
+        style_score=decision["style_score"],
+        combined_score=decision["combined_score"],
+        label=decision["label"],
+        status="decided",
+        text_length=len(text),
+        **extra,
+    )
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /submit isn't built yet — see the TODO in app.py.",
-        "you_sent": {
-            "text_length": len(payload.get("text", "")),
-            "creator_id": payload.get("creator_id"),
+        "content_id": content_id,
+        "creator_id": creator_id,
+        **decision,
+        "status": "decided",
+        **extra,
+        "appeal": {
+            "how": "POST /appeal with this content_id and your reasoning",
+            "content_id": content_id,
         },
-    }), 501
+    })
+
+
+def _reject(status, error, field, message, payload):
+    """
+    Refuse a request, and leave a trace of it.
+
+    A rejection is never a verdict on the writer: no score, no label, no
+    content_id. The text itself isn't logged, only which rule it broke.
+    """
+    creator = payload.get("creator_id") if isinstance(payload, dict) else None
+    audit.log_rejection(
+        creator_id=creator if isinstance(creator, str) and creator.strip() else "unknown",
+        reason=error,
+        field=field,
+        http_status=status,
+    )
+    return jsonify({"error": error, "field": field, "message": message}), status
 
 
 @app.post("/appeal")

@@ -46,6 +46,16 @@ DETECTOR_MODEL = os.getenv("AI201_DETECTOR_MODEL", "gpt2")
 # 300 words, which is enough for the signal to mean something.
 DETECTOR_MAX_TOKENS = 400
 
+# The longest `text` /submit accepts. Anything over it is refused with a 413,
+# not truncated — see DESIGN.md. A proposal until tested, like every number here.
+MAX_TEXT_CHARS = 20_000
+
+# Below either of these, a submission is too short for the signals to mean
+# anything, and gets "insufficient_evidence" instead of a score — not a 400,
+# because a short poem is a legitimate submission. Proposals until Milestone 4.
+MIN_WORDS_TO_ASSESS = 50
+MIN_SENTENCES_TO_ASSESS = 3
+
 
 # ─── Scoring (Milestone 4) ───────────────────────────────────────────────────
 # How much each signal counts toward the combined score.

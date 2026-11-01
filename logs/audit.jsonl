@@ -1,0 +1,21 @@
+{"timestamp": "2026-11-01T18:08:47+00:00", "creator_id": "w1", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "text", "http_status": 400}
+{"timestamp": "2026-11-01T18:08:59+00:00", "creator_id": "w1", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "text", "http_status": 400}
+{"timestamp": "2026-11-01T18:08:59+00:00", "creator_id": "w1", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "text", "http_status": 400}
+{"timestamp": "2026-11-01T18:09:00+00:00", "creator_id": "w1", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "text", "http_status": 400}
+{"timestamp": "2026-11-01T18:09:00+00:00", "creator_id": "w1", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "text", "http_status": 400}
+{"timestamp": "2026-11-01T18:09:00+00:00", "creator_id": "w1", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "text", "http_status": 400}
+{"timestamp": "2026-11-01T18:09:01+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "creator_id", "http_status": 400}
+{"timestamp": "2026-11-01T18:09:01+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "creator_id", "http_status": 400}
+{"timestamp": "2026-11-01T18:09:01+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "creator_id", "http_status": 400}
+{"timestamp": "2026-11-01T18:09:01+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": null, "http_status": 400}
+{"timestamp": "2026-11-01T18:09:02+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": null, "http_status": 400}
+{"timestamp": "2026-11-01T18:09:02+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": null, "http_status": 400}
+{"timestamp": "2026-11-01T18:09:02+00:00", "creator_id": "boundary_20001", "event": "rejected", "status": "rejected", "reason": "too_long", "field": "text", "http_status": 413}
+{"timestamp": "2026-11-01T18:11:42+00:00", "creator_id": "step3_bad", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "text", "http_status": 400}
+{"timestamp": "2026-11-01T18:16:19+00:00", "content_id": "8a12d332-36c0-45ad-ae81-f612d65e4a2e", "creator_id": "step4_long1", "guess": "unsure", "model_score": 0.4798, "style_score": 0.5, "combined_score": 0.5, "label": "PLACEHOLDER — labels are written in Milestone 5.", "status": "decided", "text_length": 455}
+{"timestamp": "2026-11-01T18:16:20+00:00", "content_id": "a28bcdc3-c198-459b-833e-6e5b780ccfc0", "creator_id": "step4_long2", "guess": "unsure", "model_score": 0.5046, "style_score": 0.5, "combined_score": 0.5, "label": "PLACEHOLDER — labels are written in Milestone 5.", "status": "decided", "text_length": 431}
+{"timestamp": "2026-11-01T18:16:20+00:00", "content_id": "0d91c209-c422-49ac-a5e7-ef90d7554013", "creator_id": "step4_short", "guess": "insufficient_evidence", "model_score": null, "style_score": null, "combined_score": null, "label": "This piece is too short for us to assess, so we haven't made any judgment about it.", "status": "decided", "text_length": 86, "reason": "too_short_to_assess"}
+{"timestamp": "2026-11-01T18:16:20+00:00", "creator_id": "step4_bad", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "text", "http_status": 400}
+{"timestamp": "2026-11-01T18:16:20+00:00", "creator_id": "step4_bad", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": "text", "http_status": 400}
+{"timestamp": "2026-11-01T18:16:20+00:00", "creator_id": "step4_bad", "event": "rejected", "status": "rejected", "reason": "too_long", "field": "text", "http_status": 413}
+{"timestamp": "2026-11-01T18:16:20+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_input", "field": null, "http_status": 400}
