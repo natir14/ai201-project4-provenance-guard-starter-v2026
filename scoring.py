@@ -16,12 +16,58 @@ function holding your combining rule. The grader checks your code against what
 you claim, so that line should read `scoring.py::combine_signals`.
 """
 
+import math
+from numbers import Real
+
 import config
+
+
+def _check_score(name: str, value) -> float:
+    """A signal score must be a real, finite number in 0–1 — refuse anything else."""
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise TypeError(f"{name} must be a number, got {type(value).__name__}")
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be between 0 and 1, got {value!r}")
+    return float(value)
+
+
+def _check_weights() -> tuple[float, float]:
+    """
+    The two weights from config.py, refused if they can't make an average:
+    non-numeric, negative, NaN/infinite, or both zero. A broken setting fails
+    loudly here rather than quietly producing a score nobody chose.
+    """
+    weights = {
+        "WEIGHT_MODEL_SIGNAL": config.WEIGHT_MODEL_SIGNAL,
+        "WEIGHT_STYLE_SIGNAL": config.WEIGHT_STYLE_SIGNAL,
+    }
+    for name, w in weights.items():
+        if isinstance(w, bool) or not isinstance(w, Real) or not math.isfinite(w) or w < 0:
+            raise ValueError(f"config.{name} must be a finite number ≥ 0, got {w!r}")
+    model_w, style_w = (float(w) for w in weights.values())
+    if model_w + style_w <= 0:
+        raise ValueError("config.WEIGHT_MODEL_SIGNAL and WEIGHT_STYLE_SIGNAL can't both be 0")
+    return model_w, style_w
 
 
 def combine_signals(model_score: float, style_score: float) -> float:
     """
-    Combine two 0–1 signals into one 0–1 score. ← TODO (Milestone 4)
+    Combine two 0–1 signals into one 0–1 score.
+
+    **The rule:** a normalised weighted average,
+
+        (WEIGHT_MODEL_SIGNAL × model_score + WEIGHT_STYLE_SIGNAL × style_score)
+        ÷ (WEIGHT_MODEL_SIGNAL + WEIGHT_STYLE_SIGNAL)
+
+    with both weights currently 0.5, so it's the plain mean. Dividing by the
+    total keeps the result on 0–1 whatever the weights add up to. When the
+    signals disagree, the result lands between them — two methods splitting
+    reads as uncertainty, not as either one winning. Rounded to 4 places, like
+    both signals.
+
+    Invalid inputs are refused, not clamped: a score outside 0–1, NaN or
+    infinite raises ValueError; a non-number (including True/False) raises
+    TypeError. So do broken weights — see `_check_weights`.
 
     Both inputs point the same way: higher means more likely AI. Your output
     should too.
@@ -52,11 +98,11 @@ def combine_signals(model_score: float, style_score: float) -> float:
     The weights in config.py are placeholders. Change them, or ignore them and
     write a different rule.
     """
-    # TODO: replace this
-    return (
-        config.WEIGHT_MODEL_SIGNAL * model_score
-        + config.WEIGHT_STYLE_SIGNAL * style_score
-    )
+    model_score = _check_score("model_score", model_score)
+    style_score = _check_score("style_score", style_score)
+    model_w, style_w = _check_weights()
+    combined = (model_w * model_score + style_w * style_score) / (model_w + style_w)
+    return round(min(max(combined, 0.0), 1.0), 4)
 
 
 def score_to_label(score: float) -> tuple[str, str]:

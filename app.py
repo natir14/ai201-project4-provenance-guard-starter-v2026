@@ -31,6 +31,7 @@ from flask import Flask, jsonify, request
 import audit
 import config
 import detector
+import scoring
 import stylometry
 
 app = Flask(__name__)
@@ -245,15 +246,17 @@ def submit():
                        "The checker isn't available right now, so nothing was "
                        "decided about your text. Please try again later.", payload)
 
-    # style_score, combined_score, guess, confidence and label are still
-    # placeholders — Milestones 4 and 5 fill them in.
+    style_score = stylometry.style_signal(text)
+    combined_score = scoring.combine_signals(model_score, style_score)
+
+    # guess, confidence and label are still placeholders — Milestone 5.
     return _decide(creator_id, text, {
         "guess": "unsure",
         "confidence": 0.0,
         "label": "PLACEHOLDER — labels are written in Milestone 5.",
         "model_score": model_score,
-        "style_score": 0.5,
-        "combined_score": 0.5,
+        "style_score": style_score,
+        "combined_score": combined_score,
     })
 
 

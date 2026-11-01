@@ -67,6 +67,31 @@ MIN_SENTENCES_TO_ASSESS = 3
 WEIGHT_MODEL_SIGNAL = 0.5
 WEIGHT_STYLE_SIGNAL = 0.5
 
+# How stylometry.style_signal maps each raw measure onto 0–1. Each pair is
+# (the value that scores 1.0, most AI-like; the value that scores 0.0, most
+# human-like), with a straight line between and clamping outside. Proposals
+# until the Milestone 4 calibration inputs have been run — see DESIGN.md.
+#
+# CALIBRATION STATUS (2026-11-01): INCOMPLETE. No verified human-written
+# samples yet — only AI-written ones, two with real GPT-2 scores. These
+# anchors, the part weights below, the signal weights above and the label
+# thresholds are all provisional. Nothing here is a calibrated detector.
+STYLE_SPREAD_ANCHORS = (0.20, 0.70)        # sentence-length CV: even → AI
+STYLE_TTR_ANCHORS = (0.60, 0.80)           # moving-average TTR: repetitive → AI
+STYLE_PUNCT_DENSITY_ANCHORS = (0.5, 2.0)   # inner punctuation per sentence: sparse → AI
+STYLE_PUNCT_KINDS_ANCHORS = (1, 4)         # kinds of inner punctuation used: few → AI
+
+# Moving-average TTR window. Below this many words the measure is undefined.
+STYLE_TTR_WINDOW = 50
+
+# How much each part counts inside stylometry.style_signal. Provisional.
+# Punctuation is measured but weighted 0 for now: in the Step 1B calibration
+# review it sat at or near 1.0 (most AI-like) on 7 of 8 samples, adding about
+# +0.33 to almost everything, and its direction is still unconfirmed.
+STYLE_WEIGHT_SPREAD = 0.50
+STYLE_WEIGHT_VOCABULARY = 0.50
+STYLE_WEIGHT_PUNCTUATION = 0.00
+
 
 # ─── Thresholds (Milestone 5) ────────────────────────────────────────────────
 # Where one label becomes another. Scores run 0.0 (confidently human) to 1.0
