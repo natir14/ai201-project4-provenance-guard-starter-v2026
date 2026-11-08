@@ -50,9 +50,10 @@ language, with a way to appeal. It is an estimate, not a verdict, and it is
    invalid_input`; text over 20,000 characters → `413 too_long`. Each refusal
    is written to the audit log as a `rejected` entry. No score, no label, no
    `content_id` — a refusal is never a verdict on the writer.
-3. **Too short to judge?** Under 50 words or under 3 sentences, nothing is
-   scored: the answer is `200` with `guess: "insufficient_evidence"`, null
-   scores and a neutral sentence. Short poems are legitimate, not suspicious.
+3. **Too short to judge?** Under 50 words, nothing is scored: the answer is
+   `200` with `guess: "insufficient_evidence"`, null scores and a neutral
+   sentence. Short poems are legitimate, not suspicious. (Until Unit 8 this
+   was "under 50 words *or* under 3 sentences" — see The Improvement.)
 4. **Signal one — predictability.** `detector.model_signal` runs GPT-2 on the
    writer's own machine and turns perplexity into `model_score` (0 = human-like,
    1 = AI-like). If the model can't load: `503 detector_unavailable` and **no
@@ -935,22 +936,155 @@ it.* Broke FP05 and FP07; FP02 and FP03 held only narrowly.
 
 ## The Improvement
 
-**What I changed:**
+**What I changed:** The "too short to assess" gate in `app.py::submit` now
+uses **word count alone** (under 50 words). It used to be "under 50 words *or*
+under 3 sentences"; the sentence half is gone, and so is the setting
+`MIN_SENTENCES_TO_ASSESS` in `config.py`. Nothing else changed — no signal,
+weight, threshold or label. A long text with one or two sentences is now
+scored; its sentence-length spread is undefined and counts as neutral (0.5),
+as it always has.
 
-**Which diagnosis pointed at it:**
+```diff
+-    if (len(stylometry.words(text)) < config.MIN_WORDS_TO_ASSESS
+-            or len(stylometry.sentences(text)) < config.MIN_SENTENCES_TO_ASSESS):
++    if len(stylometry.words(text)) < config.MIN_WORDS_TO_ASSESS:
+```
+
+**Which diagnosis pointed at it:** **D3** — EV07 was a 97-word AI paragraph
+whose sentences were joined with semicolons; the splitter counted one
+sentence, so the route answered "too short to assess" and nothing was judged.
+That's an escape from the system entirely, and a gap I'd introduced myself in
+Milestone 3.
+
+**Why this one and not D1.** D1 (the vocabulary measure) is the bigger
+problem, so I projected the obvious D1 fix before choosing — turning the
+vocabulary measure off — using the *real* GPT-2 scores from the logged runs
+and recomputing only the style signal (signal one doesn't depend on it; the
+projection reproduced the actual before-run exactly). It would have caught all
+10 AI texts instead of 3 — but labelled **2 of the 10 Gutenberg human passages
+AI** (failing criterion 1's revised target) and turned the instructor's human
+texts from 2 false accusations into **4**, including FP03, the careful
+non-native writer. That trades the cheap mistake for the expensive one. The D3
+fix touches nothing that scores text, so it can't create a false accusation —
+it only decides *whether* a text is scored. It's the smaller fix, chosen
+because it was the one I could make without making the worse error more
+likely.
+
+Tests: the three Milestone 3 tests that encoded the old two-part gate were
+replaced by five (`test_submit.py::ShortTextGate`): a semicolon-joined long
+text is scored; a 2-sentence 70-word text is scored; missing spaces still
+can't dodge scoring; 49 words isn't scored and 50 is; a short text with many
+sentences still isn't. **143 tests pass.**
 
 ### Attack Run — After
 
 <!-- Same format. `run_attacks.py --label after` -->
 
+`python run_attacks.py --set attack_set --label after`, 2026-11-08 →
+`results/attack_run_2026-11-08_1130_after.md` (the before-run file is
+untouched). Same verdict rules as the before-run.
 
+**56 attacks: 50 held, 6 broke** (before: 49 held, 7 broke). No crashes, no
+5xx; the same nine `429`s.
+
+| ID | Family | HTTP | Guess | model | style | combined | Verdict | vs before |
+|---|---|---|---|---|---|---|---|---|
+| EV01 | evasion | 200 | human | 0.1635 | 0.5 | 0.3317 | **BROKE** | unchanged |
+| EV02 | evasion | 200 | human | 0.5943 | 0 | 0.2972 | **BROKE** | unchanged |
+| EV03 | evasion | 200 | unsure | 0.6662 | 0.2566 | 0.4614 | **HELD** | unchanged |
+| EV04 | evasion | 200 | unsure | 0.6114 | 0.5 | 0.5557 | **HELD** | unchanged |
+| EV05 | evasion | 200 | human | 0.3212 | 0.0247 | 0.1729 | **BROKE** | unchanged — ambiguous (heavy human rewrite) |
+| EV06 | evasion | 200 | human | 0.5727 | 0 | 0.2863 | **BROKE** | unchanged |
+| EV07 | evasion | 200 | unsure | 0.5862 | 0.25 | 0.4181 | **HELD** | **changed:** now scored → unsure (was: escaped scoring) |
+| EV08 | evasion | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| EV09 | evasion | 200 | unsure | 0.7042 | 0.2325 | 0.4684 | **HELD** | unchanged |
+| EV10 | evasion | 200 | ai | 0.9792 | 0.8061 | 0.8926 | **HELD** | unchanged |
+| FP01 | false_positive | 200 | unsure | 0.6175 | 0.2425 | 0.43 | **HELD** | unchanged |
+| FP02 | false_positive | 200 | unsure | 0.7387 | 0.5357 | 0.6372 | **HELD** | unchanged |
+| FP03 | false_positive | 200 | unsure | 0.8051 | 0.3718 | 0.5885 | **HELD** | unchanged |
+| FP04 | false_positive | 200 | unsure | 0.8329 | 0.3333 | 0.5831 | **HELD** | unchanged |
+| FP05 | false_positive | 200 | ai | 0.8005 | 0.8589 | 0.8297 | **BROKE** | unchanged |
+| FP06 | false_positive | 200 | unsure | 0.8814 | 0.2908 | 0.5861 | **HELD** | unchanged |
+| FP07 | false_positive | 200 | ai | 0.8816 | 0.5 | 0.6908 | **BROKE** | unchanged |
+| FP08 | false_positive | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| PI01 | prompt_injection | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| PI02 | prompt_injection | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| PI03 | prompt_injection | 200 | unsure | 0.5943 | 0.3569 | 0.4756 | **HELD** | unchanged |
+| PI04 | prompt_injection | 200 | unsure | 0.4998 | 0.3033 | 0.4016 | **HELD** | unchanged |
+| PI05 | prompt_injection | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| PI06 | prompt_injection | 200 | unsure | 0.5583 | 0.2546 | 0.4064 | **HELD** | unchanged |
+| MF01 | malformed | 400 | — | — | — | — | **HELD** | unchanged |
+| MF02 | malformed | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| MF03 | malformed | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| MF04 | malformed | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| MF05 | malformed | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| MF06 | malformed | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| MF07 | malformed | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| MF08 | malformed | 413 | — | — | — | — | **HELD** | unchanged |
+| RQ01 | malformed | 400 | — | — | — | — | **HELD** | unchanged |
+| RQ02 | malformed | 400 | — | — | — | — | **HELD** | unchanged |
+| RQ03 | malformed | 400 | — | — | — | — | **HELD** | unchanged |
+| RQ04 | malformed | 400 | — | — | — | — | **HELD** | unchanged |
+| RQ05 | malformed | 400 | — | — | — | — | **HELD** | unchanged |
+| RQ06 | malformed | 400 | — | — | — | — | **HELD** | unchanged |
+| RQ07 | malformed | 400 | — | — | — | — | **HELD** | unchanged |
+| RQ08 | malformed | 400 | — | — | — | — | **HELD** | unchanged |
+| RQ09 | malformed | 400 | — | — | — | — | **HELD** | unchanged |
+| RQ10 | malformed | 429 | — | — | — | — | **HELD** | unchanged — 429 not 400 (shared IP allowance) |
+| RQ11 | malformed | 429 | — | — | — | — | **HELD** | unchanged — 429 not 400 (shared IP allowance) |
+| RQ12 | malformed | 400 | — | — | — | — | **HELD** | unchanged |
+| FL01_01 | flood_same_creator | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| FL01_02 | flood_same_creator | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| FL01_03 | flood_same_creator | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| FL01_04 | flood_same_creator | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| FL01_05 | flood_same_creator | 200 | insufficient_evidence | — | — | — | **HELD** | unchanged |
+| FL01_06 | flood_same_creator | 429 | — | — | — | — | **HELD** | unchanged |
+| FL01_07 | flood_same_creator | 429 | — | — | — | — | **HELD** | unchanged |
+| FL01_08 | flood_same_creator | 429 | — | — | — | — | **HELD** | unchanged |
+| FL01_09 | flood_same_creator | 429 | — | — | — | — | **HELD** | unchanged |
+| FL01_10 | flood_same_creator | 429 | — | — | — | — | **HELD** | unchanged |
+| FL01_11 | flood_same_creator | 429 | — | — | — | — | **HELD** | unchanged |
+| FL01_12 | flood_same_creator | 429 | — | — | — | — | **HELD** | unchanged |
 
 **Did it help, and how do I know:**
 
 <!-- Widening the unsure band usually fixes one problem and creates another.
      Reporting that trade honestly is worth full credit. -->
 
+**Yes, for exactly one attack — and it didn't hurt anything else.** Measured,
+not assumed:
 
+- **EV07 changed, and only EV07.** Before: `insufficient_evidence`, no scores.
+  After: scored — `model_score` 0.5862, `style_score` 0.25, `combined_score`
+  0.4181 → **unsure** (log entry `513b59a5-ed71-4a17-bd22-b5cfa0cad1f8`). It
+  was an escape; now it's judged, and "unsure" holds under my rule.
+- **The other 55 attacks are identical** — same HTTP status, same label, and
+  the same `model_score`, `style_score` and `combined_score` to four decimal
+  places, checked against the audit log entry for every one.
+- **The five criteria are identical** — every field of every trial in
+  `results/run_2026-11-08_1131_after.md` matches the before-run, and
+  criterion 4 (`results/appeals_2026-11-08_1131_after.md`) passed 5/5 · 404 ·
+  409 in all three trials again. **No regressions.**
+
+| Criterion | Before | After |
+|---|---|---|
+| 1 as written | NOT EVALUABLE | NOT EVALUABLE (unchanged — still no samples of my own writing) |
+| 1 revised (Gutenberg) | MET — 0/10 labelled AI | MET — 0/10 |
+| 2 | MET — +0.2371 | MET — +0.2371 |
+| 3 | MET | MET |
+| 4 | MET | MET |
+| 5 | MET | MET |
+
+**The trade, honestly:** EV07 is now *scored*, not *caught*. With its sentence
+spread undefined (neutral) and the vocabulary measure at 0 (D1), its style
+score is 0.25 — a lean toward human. It landed unsure only because GPT-2 gave
+it 0.59. The same paragraph with a slightly less predictable wording (model
+below 0.45) would now come out **human** instead of unjudged. The fix closed an
+escape route; it moved the attack onto ground where D1 and D2 still decide.
+And a writer whose long text uses one or two sentences — a single long
+run-on paragraph, say — is now judged where before they'd have been told
+"too short"; their spread counts as neutral, so the change can't push them
+toward AI.
 
 ---
 

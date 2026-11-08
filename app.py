@@ -227,9 +227,10 @@ def submit():
                        f"Please submit a shorter piece.", payload)
 
     # Too short to judge isn't suspicious and isn't an error: say so, run no
-    # signal, and make no claim either way.
-    if (len(stylometry.words(text)) < config.MIN_WORDS_TO_ASSESS
-            or len(stylometry.sentences(text)) < config.MIN_SENTENCES_TO_ASSESS):
+    # signal, and make no claim either way. Judged on word count alone — a
+    # sentence count let a long text skip scoring by joining its sentences
+    # with semicolons (attack EV07; Unit 8, Milestone 5).
+    if len(stylometry.words(text)) < config.MIN_WORDS_TO_ASSESS:
         return _decide(creator_id, text, {
             "guess": "insufficient_evidence",
             "confidence": None,

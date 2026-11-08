@@ -198,13 +198,16 @@ class DetectorFailure(SubmitTestCase):
         self.assertEqual(rejection["reason"], "detector_unavailable")
 
 
-class MinimumSentences(SubmitTestCase):
+class ShortTextGate(SubmitTestCase):
     """
-    The short-text check counts sentences with stylometry.sentences, so the
-    splitter fixes change which submissions get scored at all.
+    "Too short to assess" is decided by word count alone (Unit 8, Milestone 5).
+
+    It used to be "fewer than 50 words OR fewer than 3 sentences". Attack EV07
+    showed the sentence half let a long text skip scoring by joining its
+    sentences with semicolons, so it was removed.
     """
 
-    # 70 words, but only 2 real sentences — the starter splitter counted 6.
+    # 70 words, 2 sentences (the abbreviations don't count as extra ones).
     TWO_SENTENCES_WITH_TITLES = (
         "Yesterday Mr. Okafor and Dr. Lee walked slowly along the river path near "
         "the old mill, talking about the flood that had ruined the bakery, the "
@@ -213,34 +216,55 @@ class MinimumSentences(SubmitTestCase):
         "bridge and stayed there until the lights came on across the water."
     )
 
-    def test_missing_spaces_cannot_dodge_scoring(self):
-        # Deleting the spaces after full stops used to make LONG one "sentence",
-        # so it got insufficient_evidence and was never scored.
-        squashed = LONG.replace(". ", ".")
-        self.assertGreaterEqual(len(stylometry.sentences(squashed)), config.MIN_SENTENCES_TO_ASSESS)
-
-        body = self.submit({"text": squashed, "creator_id": "it_squashed"}).get_json()
+    def assert_scored(self, text, creator_id):
+        body = self.submit({"text": text, "creator_id": creator_id}).get_json()
         self.assertNotEqual(body["guess"], "insufficient_evidence")
-        self.model.assert_called_once_with(squashed)
-        self.assertIsNotNone(body["style_score"])
+        self.model.assert_called_once_with(text)
+        self.assertIsNotNone(body["combined_score"])
+        return body
 
-    def test_abbreviations_do_not_count_as_extra_sentences(self):
-        text = self.TWO_SENTENCES_WITH_TITLES
-        self.assertGreaterEqual(len(stylometry.words(text)), config.MIN_WORDS_TO_ASSESS)
-        self.assertEqual(len(stylometry.sentences(text)), 2)
-
-        body = self.submit({"text": text, "creator_id": "it_titles"}).get_json()
+    def assert_not_scored(self, text, creator_id):
+        body = self.submit({"text": text, "creator_id": creator_id}).get_json()
         self.assertEqual(body["guess"], "insufficient_evidence")
         self.model.assert_not_called()
         self.style.assert_not_called()
-        self.combine.assert_not_called()
+        return body
 
-    def test_three_real_sentences_are_scored(self):
-        text = self.TWO_SENTENCES_WITH_TITLES + " Nobody mentioned the flood again."
-        self.assertEqual(len(stylometry.sentences(text)), 3)
-        body = self.submit({"text": text, "creator_id": "it_three"}).get_json()
-        self.assertNotEqual(body["guess"], "insufficient_evidence")
-        self.model.assert_called_once()
+    def test_semicolon_joined_long_text_is_scored(self):
+        # The EV07 pattern: every full stop but the last swapped for a semicolon.
+        joined = LONG.replace(". ", "; ")
+        self.assertEqual(len(stylometry.sentences(joined)), 1)
+        self.assertGreaterEqual(len(stylometry.words(joined)), config.MIN_WORDS_TO_ASSESS)
+        body = self.assert_scored(joined, "it_semicolons")
+        self.assertIsNotNone(body["style_score"])
+
+    def test_long_text_with_two_sentences_is_scored(self):
+        text = self.TWO_SENTENCES_WITH_TITLES
+        self.assertEqual(len(stylometry.sentences(text)), 2)   # abbreviations don't split
+        self.assert_scored(text, "it_titles")
+
+    def test_missing_spaces_still_cannot_dodge_scoring(self):
+        squashed = LONG.replace(". ", ".")
+        self.assertGreaterEqual(len(stylometry.sentences(squashed)), 3)
+        self.assert_scored(squashed, "it_squashed")
+
+    def test_word_count_boundary(self):
+        self.assertEqual(config.MIN_WORDS_TO_ASSESS, 50)
+        self.assertFalse(hasattr(config, "MIN_SENTENCES_TO_ASSESS"))
+        words49 = " ".join(["Word"] * 48) + " end."
+        words50 = " ".join(["Word"] * 49) + " end."
+        self.assertEqual(len(stylometry.words(words49)), 49)
+        self.assertEqual(len(stylometry.words(words50)), 50)
+        self.assert_not_scored(words49, "it_49")
+        self.model.reset_mock()
+        self.style.reset_mock()
+        self.assert_scored(words50, "it_50")
+
+    def test_short_text_with_many_sentences_still_not_scored(self):
+        # Under 50 words stays "too short", however many sentences it has.
+        short = "Went for a run. Legs hurt. Worth it. Will go again. Maybe."
+        self.assertGreater(len(stylometry.sentences(short)), 3)
+        self.assert_not_scored(short, "it_short_many")
 
 
 class Classification(SubmitTestCase):

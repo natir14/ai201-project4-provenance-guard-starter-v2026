@@ -50,11 +50,16 @@ DETECTOR_MAX_TOKENS = 400
 # not truncated — see DESIGN.md. A proposal until tested, like every number here.
 MAX_TEXT_CHARS = 20_000
 
-# Below either of these, a submission is too short for the signals to mean
-# anything, and gets "insufficient_evidence" instead of a score — not a 400,
-# because a short poem is a legitimate submission. Proposals until Milestone 4.
+# Below this, a submission is too short for the signals to mean anything, and
+# gets "insufficient_evidence" instead of a score — not a 400, because a short
+# poem is a legitimate submission. Provisional, like every number here.
+#
+# There used to be a second gate, "fewer than 3 sentences". Unit 8's attack
+# EV07 showed it let a 97-word text skip scoring entirely by joining its
+# sentences with semicolons, so it was removed in Milestone 5. A long text with
+# one or two sentences is now scored; its sentence-length spread is undefined
+# and counts as neutral (0.5), as it always has.
 MIN_WORDS_TO_ASSESS = 50
-MIN_SENTENCES_TO_ASSESS = 3
 
 # The longest `reasoning` /appeal accepts — see DESIGN.md.
 MAX_REASONING_CHARS = 2_000
