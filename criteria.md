@@ -54,6 +54,21 @@ Wrongly accusing a genuine writer can cause serious harm. Allowing at most 1 in
 10 gives the detector a challenging false-positive limit without requiring
 perfection.
 
+> **Revised in unit 8:** Test 10 human-written passages with verifiable
+> provenance — public-domain books from Project Gutenberg, each selected by a
+> fixed rule (the first paragraph at or after 40% of the way through the book
+> with 100–250 words and at least 3 sentences; sources in `scenarios.py`). In
+> each of three trials, no more than 1 may receive a high-confidence AI label.
+> An unsure label does not count as a false accusation.
+>
+> **Why revised:** the original couldn't be *measured*. I don't have ten
+> samples of my own writing, and no other text is "my own" — so as written it
+> is **not evaluable**, not passed or failed. The target is unchanged (at most 1
+> in 10); only the source of the human writing changed, to one whose human
+> authorship can be checked. The cost: these are 19th-century literary prose,
+> not modern writing — and not the plain, second-language writing this
+> criterion most needs to protect. The original line stands above, untouched.
+
 ---
 
 ## 2. Score separation

@@ -672,19 +672,143 @@ vocabulary measure. To be tested in the Run Log and Verdicts stage.
 
 <!-- Your five criteria across three trials. `run_eval.py --label before`. -->
 
+Run against the local server on 2026-11-08 (rate limiting on; detector
+unchanged). Criteria 1–3 and 5: `python run_eval.py --label before` →
+`results/run_2026-11-08_1120_before.md`. Criterion 4: `python eval_appeals.py
+--label before` → `results/appeals_2026-11-08_1120_before.md` (`run_eval.py`
+only sends `/submit`, so the appeal path needed its own script).
+
+**What was tested — and where it came from** (full sources in `scenarios.py`):
+- **Human writing:** 10 passages from public-domain books on Project Gutenberg
+  (Austen, Twain, Conan Doyle, Stoker, Thoreau, Douglass, Washington, Dickens,
+  Shelley, Brontë), each picked by a fixed rule *before* anything was scored —
+  the first paragraph at or after 40% of the way in, 100–250 words, at least 3
+  sentences. URL, paragraph number and file hash are recorded for each.
+- **AI writing:** 10 paragraphs written by Claude for this test.
+- **Not my own writing.** I don't have ten samples of my own, so criterion 1
+  as written can't be measured; it has a documented revision in `criteria.md`,
+  with the original left in place.
+
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |
+| 1. False positives — *as written* | ≤ 1 of 10 of **my own** texts labelled AI | not run | not run | not run | *Milestone 4* |
+| 1. False positives — *revised* | ≤ 1 of 10 Gutenberg human passages labelled AI | 0 of 10 (7 unsure, 3 human) | 0 of 10 | 0 of 10 | *Milestone 4* |
+| 2. Score separation | AI mean `combined_score` ≥ human mean + 0.20, all scored | AI 0.6243 − human 0.3872 = **+0.2371** | +0.2371 | +0.2371 | *Milestone 4* |
+| 3. Label coverage | all three labels at least once in 9 submissions | human 1, unsure 5, AI 3 | same | same | *Milestone 4* |
+| 4. Appeal process | 5/5 valid appeals → 200, `under_review`, entry appended, decision kept; unknown → 404; duplicate → 409 | 5/5 · 404 · 409 | 5/5 · 404 · 409 | 5/5 · 404 · 409 | *Milestone 4* |
+| 5. Invalid input | empty, missing, null, numeric → 400; > 20,000 chars → 413 with a rejection entry and no score, label or `content_id` | 400 400 400 400 413 | same | same | *Milestone 4* |
+
+All three trials came out identical, to four decimal places. Signal one is
+GPT-2 in evaluation mode and signal two is plain arithmetic, so the same text
+gets the same score — the trials test repeatability, not luck.
+
+Criterion 2's `combined_score` isn't in `run_eval.py`'s report, so it was
+recomputed with `scoring.combine_signals` from the recorded `model_score` and
+`style_score` — and checked against the audit log, where all 60 entries carry
+exactly those values. Criterion 5's rejections were checked in the log: 15
+entries (3 per body), each `invalid_input`/400 or `too_long`/413, none with a
+`content_id`.
 
 **Real output from one trial**, pasted as text, naming the file and function
 that produced it:
 
-```json
+Criterion 5, trial 1 — `results/run_2026-11-08_1120_before.md`, produced by
+`run_eval.py::main` (service: `app.py::submit`):
 
+```json
+[
+  {
+    "status": 400,
+    "guess": null,
+    "confidence": null,
+    "model_score": null,
+    "style_score": null,
+    "label": null,
+    "sent": "(empty text)"
+  },
+  {
+    "status": 400,
+    "guess": null,
+    "confidence": null,
+    "model_score": null,
+    "style_score": null,
+    "label": null,
+    "sent": "{\"creator_id\": \"eval_c5_missing\"}"
+  },
+  {
+    "status": 400,
+    "guess": null,
+    "confidence": null,
+    "model_score": null,
+    "style_score": null,
+    "label": null,
+    "sent": "{\"text\": null, \"creator_id\": \"eval_c5_null\"}"
+  },
+  {
+    "status": 400,
+    "guess": null,
+    "confidence": null,
+    "model_score": null,
+    "style_score": null,
+    "label": null,
+    "sent": "{\"text\": 12345, \"creator_id\": \"eval_c5_numeric\"}"
+  },
+  {
+    "status": 413,
+    "guess": null,
+    "confidence": null,
+    "model_score": null,
+    "style_score": null,
+    "label": null,
+    "sent": "word word word word word word word word word word word word word word "
+  }
+]
+```
+
+Criterion 4, trial 1 (first of five appeals, plus the 404 and 409) —
+`results/appeals_2026-11-08_1120_before.md`, produced by
+`eval_appeals.py::main` (service: `app.py::submit`, `app.py::appeal`):
+
+```json
+{
+  "appeals[0]": {
+    "submit_status": 200,
+    "content_id": "dad7b905-fab0-46fa-8303-93bf966e356e",
+    "guess": "unsure",
+    "appeal_status": 200,
+    "appeal_response": {
+      "appealed_at": "2026-11-08T16:20:17+00:00",
+      "content_id": "dad7b905-fab0-46fa-8303-93bf966e356e",
+      "message": "Thanks — your appeal is recorded and a person will review this decision. The original label is paused while they do.",
+      "original_guess": "unsure",
+      "previous_status": "decided",
+      "status": "under_review"
+    },
+    "appeal_entries_after": 1,
+    "decision_unchanged": true,
+    "log_entries_added": 1,
+    "passed": true
+  },
+  "unknown": {
+    "status": 404,
+    "response": {
+      "error": "unknown_content_id",
+      "field": "content_id",
+      "message": "We couldn't find a result with that content_id. Please check it matches the one in your result exactly."
+    }
+  },
+  "duplicate": {
+    "status": 409,
+    "response": {
+      "error": "already_under_review",
+      "field": "content_id",
+      "message": "Your appeal for this result is already recorded and waiting for a person to review it. You don't need to send it again."
+    },
+    "appeal_entries_after": 1
+  },
+  "valid_appeals_passed": 5,
+  "trial_passed": true
+}
 ```
 
 **Diagnoses**
