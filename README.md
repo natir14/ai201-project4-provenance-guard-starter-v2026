@@ -438,7 +438,9 @@ calibrated, and the README doesn't claim it is accurate.
 
 ## Rate Limiting
 
-**My limits:** ___ per minute, ___ per day
+**My limits:** 5 per minute, 100 per day — on `POST /submit` only
+(`config.RATE_LIMIT_PER_MINUTE`, `config.RATE_LIMIT_PER_DAY`; `GET /health`
+reports `"rate_limits": "5/minute;100/day"`).
 
 **Why those numbers and not others:**
 <!-- Think about two people: a real writer submitting their own work a few
@@ -446,17 +448,57 @@ calibrated, and the README doesn't claim it is accurate.
      thresholds. Your numbers have to be liveable for the first and hostile to
      the second. -->
 
+- **5 a minute.** A real writer pastes a piece, reads the label, maybe edits
+  and resubmits — one submission every 12 seconds is already brisk for that,
+  so 5 a minute never gets in their way. A script probing for the thresholds
+  gets 5 tries a minute instead of hundreds. Starter's 10 would also have
+  worked; 5 halves what a prober gets for no cost to a writer.
+- **100 a day.** A heavy day for one writer is a few dozen submissions; 100
+  leaves room. Mapping where 0.35 and 0.65 sit takes thousands of
+  variations — at 100 a day per creator, weeks.
+- Rejected requests count too: a script sending junk to probe the validation
+  uses up its allowance just the same (tested: 5 × `400`, then `429`).
+
 **What a caller counts as:** <!-- per address, or per creator_id? They fail
 differently — one script can look like a thousand callers, and one household
 can look like one. -->
+The starter's rule, unchanged (`app.py::rate_limit_key`): the request's
+**`creator_id`** when it's a non-empty string, otherwise the **caller's IP
+address** (missing, blank or non-string `creator_id`, non-JSON or non-object
+bodies). How each fails:
+- **Per `creator_id` can be dodged by rotating ids.** One script sending
+  `sock_1`, `sock_2`, … looks like many writers and is never limited — a test
+  in `test_rate_limit.py` documents exactly that.
+- **Per address is shared.** A classroom or household behind one IP shares
+  one allowance — but only requests *without* a usable `creator_id` fall back
+  to it.
+- Counts are kept in memory: a restart forgets them, and several server
+  processes wouldn't share them.
 
 **The run of status codes when I pushed past it:**
 
 <!-- python run_attacks.py --flood 15 -->
 
-```
+Run against the local server on 2026-11-08 with
+`python run_attacks.py --flood 15` — 15 submissions as `flood_tester`, saved
+to `results/flood_2026-11-08_1042.md`:
 
 ```
+200 200 200 200 200 429 429 429 429 429 429 429 429 429 429
+```
+
+10 of 15 rate limited: the first five got through (the flood text is short, so
+each was answered `insufficient_evidence` without scoring), and every request
+after that in the same minute got `429`. One of the ten logged rejections:
+
+```json
+{"timestamp": "2026-11-08T15:42:22+00:00", "creator_id": "flood_tester", "event": "rejected", "status": "rejected", "reason": "rate_limited", "limit": "5 per 1 minute", "http_status": 429, "endpoint": "/submit"}
+```
+
+Every `429` is logged as a `rejected` entry with `reason: "rate_limited"`,
+`http_status: 429`, `endpoint: "/submit"`, the limit hit, and the
+`creator_id` (or `"unknown"`) — an attack that only shows up as an absence is
+one you'd never find.
 
 ---
 

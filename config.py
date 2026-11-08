@@ -130,16 +130,30 @@ AI_THRESHOLD = 0.65
 
 
 # ─── Rate limiting (UNIT 8) ──────────────────────────────────────────────────
-# Off in unit 7. You turn it on and choose the numbers in unit 8, Milestone 1.
+# On from unit 8, Milestone 1. Set AI201_RATE_LIMITS=0 to switch it off.
 #
 # Think about two people: a real writer submitting their own work a few times
 # an hour, and a script sending a thousand variations to map your thresholds.
 # Your README has to say why your numbers and not others.
+#
+# Counted per creator_id (falling back to the caller's address) — see
+# app.py::rate_limit_key. Applies to POST /submit only.
+#
+#   5 a minute — a writer pastes, reads the label, edits, resubmits: one every
+#     12 seconds is already brisk for that. A script probing thresholds gets
+#     5, not hundreds. And it's under 15, so the flood test shows 429s.
+#   100 a day — a heavy day for a real writer is a few dozen submissions; 100
+#     leaves room. Mapping the thresholds takes thousands of variations, so at
+#     100 a day one creator_id would need weeks.
+#
+# ⚠️ A script can rotate creator_ids to look like many writers, and in-memory
+# storage forgets every count on restart. These numbers slow a careless
+# attacker; they don't stop a determined one.
 
-RATE_LIMITING_ENABLED = os.getenv("AI201_RATE_LIMITS", "0") == "1"
+RATE_LIMITING_ENABLED = os.getenv("AI201_RATE_LIMITS", "1") == "1"
 
-RATE_LIMIT_PER_MINUTE = 10
-RATE_LIMIT_PER_DAY = 200
+RATE_LIMIT_PER_MINUTE = 5
+RATE_LIMIT_PER_DAY = 100
 
 # Flask-Limiter warns loudly without this. In-memory is right for one laptop
 # and wrong for anything real — a restart forgets every count, and two copies

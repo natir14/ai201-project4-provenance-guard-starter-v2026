@@ -54,6 +54,8 @@ class AppealTestCase(unittest.TestCase):
                            confidence=None, text_length=80, reason="too_short_to_assess")
         self.seeded = audit.read_entries()
         self.client = service.app.test_client()
+        # Rate-limit counts live in memory for the whole run; start each test fresh.
+        getattr(service.limiter, "reset", lambda: None)()
 
     def appeal(self, body):
         return self.client.post("/appeal", json=body)

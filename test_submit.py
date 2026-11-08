@@ -64,6 +64,8 @@ class SubmitTestCase(unittest.TestCase):
         self.addCleanup(mock.patch.stopall)
 
         self.client = service.app.test_client()
+        # Rate-limit counts live in memory for the whole run; start each test fresh.
+        getattr(service.limiter, "reset", lambda: None)()
 
     def submit(self, body=None, **kwargs):
         return self.client.post("/submit", json=body, **kwargs)

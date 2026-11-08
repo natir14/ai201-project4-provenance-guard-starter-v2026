@@ -39,15 +39,10 @@ app = Flask(__name__)
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────
-# Off until you turn it on. In unit 8, Milestone 1:
-#
-#   1. Set RATE_LIMITING_ENABLED = True in config.py (or AI201_RATE_LIMITS=1)
-#   2. Choose your numbers there
-#   3. Uncomment the @limiter.limit(...) line on /submit below
-#
-# The order doesn't matter. While limiting is off, that decorator is a no-op
-# that quietly does nothing, so uncommenting it early costs you nothing — but
-# it also means no 429 until you've done step 1.
+# On (unit 8, Milestone 1): config.RATE_LIMITING_ENABLED defaults to True, the
+# numbers are in config.py, and the @limiter.limit(...) line on /submit is
+# live. AI201_RATE_LIMITS=0 switches it off, and then that decorator is a
+# no-op that quietly does nothing.
 #
 # The storage backend is preconfigured, which stops Flask-Limiter printing a
 # warning on every start. In-memory is right for one laptop and wrong for
@@ -65,6 +60,9 @@ class _LimiterOff:
     def limit(self, *args, **kwargs):
         return lambda view: view
 
+
+# The /submit limit, built once from config.py: "5/minute;100/day".
+SUBMIT_RATE_LIMIT = f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day"
 
 limiter = _LimiterOff()
 if config.RATE_LIMITING_ENABLED:
@@ -107,10 +105,13 @@ if config.RATE_LIMITING_ENABLED:
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             payload = {}
+        creator = payload.get("creator_id")
         audit.log_rejection(
-            creator_id=payload.get("creator_id", "unknown"),
+            creator_id=creator if isinstance(creator, str) and creator.strip() else "unknown",
             reason="rate_limited",
             limit=str(exc.description),
+            http_status=429,
+            endpoint=request.path,
         )
         return jsonify({
             "error": "rate_limited",
@@ -148,6 +149,7 @@ def health():
         "detector_model": config.DETECTOR_MODEL,
         "detector_loaded": loaded,
         "rate_limiting": config.RATE_LIMITING_ENABLED,
+        "rate_limits": SUBMIT_RATE_LIMIT if config.RATE_LIMITING_ENABLED else None,
         "log_entries": len(audit.read_entries()),
     })
 
@@ -155,7 +157,7 @@ def health():
 # ── Submissions and appeals (Milestones 3–5) ─────────────────────────────────
 
 @app.post("/submit")
-# @limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
+@limiter.limit(SUBMIT_RATE_LIMIT)
 def submit():
     """
     Take a piece of text, decide about it, log the decision, answer.
