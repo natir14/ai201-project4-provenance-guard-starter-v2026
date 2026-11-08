@@ -390,6 +390,37 @@ I built this with Claude (Claude Code) working in small, reviewed steps: each
 change came back with a diff and test results, and nothing was committed until
 I approved it.
 
+**What Claude Code actually did, across both units:**
+- **Development** — wrote the route, both signals, scoring, labels, appeals,
+  rate limiting and the duplicate-appeal lock, each as a small step I
+  reviewed; wrote all 143 automated tests (mocked GPT-2, temporary audit logs,
+  so the real log only holds real runs).
+- **Testing** — ran the live checks against my local server: the Sample Run,
+  the flood test, the instructor attack set before and after, and the five
+  criteria three times each (including `eval_appeals.py`, which it wrote
+  because `run_eval.py` can't test appeals).
+- **Analysis** — the calibration review, the stage-by-stage diagnoses
+  (separating observed numbers from hypotheses), and the offline projection
+  that decided Milestone 5's improvement.
+- **Documentation** — drafted this README from the real logs and reports;
+  every number was cross-checked against `logs/audit.jsonl`.
+
+**What I decided:** every target in `criteria.md`, the label wording, the
+boundary rule, which fixes to allow and which to refuse, keeping the
+instructor's attack set off GitHub, and what counts as honest evidence.
+Two decisions mattered most in Unit 8. I don't have ten samples of my own
+writing, and I refused to let AI-written text stand in for them: criterion 1
+is recorded as **not evaluable**, and the human samples came from Project
+Gutenberg with their sources recorded. And I accepted a smaller improvement
+(D3) over a bigger one (D1) once the projection showed the bigger one would
+accuse more human writers.
+
+**Where it got things wrong** — and was caught before anything was committed:
+test-side bugs (a spy counting its own call, a stray assertion left behind by
+an edit), an overstated claim in its own first draft of diagnosis D1, and a
+live-server reload that ran half-edited code once. None of these reached a
+commit; each fix is visible in the history of this work.
+
 **Moment 1 — implementing the scoring**
 
 - *What I asked for:* A combining rule in `scoring.py::combine_signals` using
@@ -426,7 +457,21 @@ I approved it.
   it checked against an unlocked version, where it failed with `[200, 200]` —
   proof the race was real and the test catches it.
 
-<!-- ✍️ Review these two moments and rewrite them in your own words before
+**Moment 3 — choosing the Unit 8 improvement**
+
+- *What I asked for:* One narrowly scoped improvement for the failures
+  diagnosed in Milestone 4, with D1 (the vocabulary measure) and D3 (the
+  sentence-count gate) as the main candidates.
+- *What came back:* Before changing anything, an offline projection of the D1
+  fix using the real logged GPT-2 scores: it would catch 10 of 10 AI texts
+  instead of 3, but label 2 Gutenberg human passages AI and raise the
+  instructor's false accusations from 2 to 4. It recommended D3 instead.
+- *What I changed:* I accepted the smaller fix, with the trade written down —
+  EV07 is now scored but not caught — rather than a bigger one that makes
+  wrong accusations more likely. The before-run evidence stayed untouched and
+  the after-run went into new files.
+
+<!-- ✍️ Review these moments and rewrite them in your own words before
      submitting — they're your account of the work. -->
 
 Overall: every result in this README comes from a real run, and anything
@@ -1093,13 +1138,47 @@ toward AI.
 <!-- For each attack still getting through and each criterion still missed:
      what you'd do, and why you stopped. -->
 
+After the improvement: **6 attacks still break, no criterion is missed, and
+one criterion can't be evaluated.** Grouped by cause (diagnoses D1–D4 above):
 
+| Still broken | Cause | What I'd do | Why I stopped |
+|---|---|---|---|
+| **FP05, FP07** — human writing labelled AI (0.83, 0.69) | D4 (signal one rates formulaic/repetitive human text as predictable) + D1 (vocabulary pushes repetitive human text toward AI) | Take vocabulary out of the style score *and* raise the AI threshold together, then re-test on modern human writing | Removing vocabulary alone, projected on the real scores, **doubled** the false accusations (2 → 4) and failed criterion 1 (revised). A fix to the costly error needs human samples I don't have, to see what it breaks |
+| **EV02, EV06** — AI text → human by adding very short sentences | D2 (spread is the only working style measure and is easy to fake; a style score of 0 halves the model score) | Make spread robust — e.g. ignore one-word "sentences" or use a median-based spread — or cap how far style alone can pull a score toward human | Ignoring short sentences would also move real human writing toward AI — people write one-word replies, exclamations and fragments too. Untested on human writing, and only one improvement was allowed |
+| **EV01** — typos → human | Signal one: `model_score` 0.16 (*hypothesis:* misspellings raise perplexity; not confirmed) | Score the uncorrupted text to confirm; spell-normalise before signal one if so | Needs an experiment first — and spell-correcting writers' text has its own fairness problems |
+| **EV05** — heavy human edit → human | Both signals read it as human | Probably nothing — a heavy rewrite may genuinely be human writing | Ambiguous, not a defect I can define |
+
+**Not broken, but still true:**
+- **EV07 is scored now, not caught.** It came back unsure (0.42) only because
+  GPT-2 gave it 0.59; its style score (0.25) leans human because of D1. A
+  slightly less predictable version would now be labelled **human**.
+- **Criterion 1 as written is NOT EVALUABLE.** It names my own writing; I have
+  none. The revised version passes on 19th-century Gutenberg prose, which
+  says nothing about modern, plain or second-language writers — the people
+  the criterion most needs to protect.
+- **Criteria 2 and 3 pass weakly.** Only 3 of 10 AI texts were labelled AI
+  (the gap held at +0.237 against +0.20); the only "human" label in criterion 3
+  came from AI-written text.
+- **Rate limiting:** rotating `creator_id`s gets around it; requests without
+  one share a per-address allowance that can mask validation (RQ10, RQ11); the
+  limits live in memory and reset on restart.
+- **The duplicate-appeal lock covers one process** — several server workers
+  would need a file lock or a database.
+- **Nothing is calibrated.** Anchors, weights and thresholds are still the
+  provisional Unit 7 values.
 
 **The trade I'd make if this ran for real:**
 
 <!-- Two sentences. Fewer wrong accusations means more AI text getting through.
      Say which way you'd go and WHO PAYS FOR IT. -->
 
+I'd keep favouring fewer wrong accusations — keep the wide unsure band, and
+only label something AI when both signals agree strongly — because a false
+accusation lands on one real writer, often the plain or second-language
+writer least able to argue back, while a missed AI text costs the platform a
+little. The cost of that choice is paid by readers and honest writers who
+compete with AI-generated work that slips through as "unsure" — which, on this
+evidence, is most of it (7 of 10 AI texts).
 
 
 <!-- ═════════════════════════════════════════════════════════════════════
