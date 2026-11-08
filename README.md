@@ -691,12 +691,30 @@ only sends `/submit`, so the appeal path needed its own script).
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
-| 1. False positives — *as written* | ≤ 1 of 10 of **my own** texts labelled AI | not run | not run | not run | *Milestone 4* |
-| 1. False positives — *revised* | ≤ 1 of 10 Gutenberg human passages labelled AI | 0 of 10 (7 unsure, 3 human) | 0 of 10 | 0 of 10 | *Milestone 4* |
-| 2. Score separation | AI mean `combined_score` ≥ human mean + 0.20, all scored | AI 0.6243 − human 0.3872 = **+0.2371** | +0.2371 | +0.2371 | *Milestone 4* |
-| 3. Label coverage | all three labels at least once in 9 submissions | human 1, unsure 5, AI 3 | same | same | *Milestone 4* |
-| 4. Appeal process | 5/5 valid appeals → 200, `under_review`, entry appended, decision kept; unknown → 404; duplicate → 409 | 5/5 · 404 · 409 | 5/5 · 404 · 409 | 5/5 · 404 · 409 | *Milestone 4* |
-| 5. Invalid input | empty, missing, null, numeric → 400; > 20,000 chars → 413 with a rejection entry and no score, label or `content_id` | 400 400 400 400 413 | same | same | *Milestone 4* |
+| 1. False positives — *as written* | ≤ 1 of 10 of **my own** texts labelled AI | not run | not run | not run | **NOT EVALUABLE** — no samples of my own writing exist |
+| 1. False positives — *revised* | ≤ 1 of 10 Gutenberg human passages labelled AI | 0 of 10 (7 unsure, 3 human) | 0 of 10 | 0 of 10 | **MET** (revised criterion only) |
+| 2. Score separation | AI mean `combined_score` ≥ human mean + 0.20, all scored | AI 0.6243 − human 0.3872 = **+0.2371** | +0.2371 | +0.2371 | **MET** — by 0.037 |
+| 3. Label coverage | all three labels at least once in 9 submissions | human 1, unsure 5, AI 3 | same | same | **MET** |
+| 4. Appeal process | 5/5 valid appeals → 200, `under_review`, entry appended, decision kept; unknown → 404; duplicate → 409 | 5/5 · 404 · 409 | 5/5 · 404 · 409 | 5/5 · 404 · 409 | **MET** |
+| 5. Invalid input | empty, missing, null, numeric → 400; > 20,000 chars → 413 with a rejection entry and no score, label or `content_id` | 400 400 400 400 413 | same | same | **MET** |
+
+**Verdicts, honestly qualified.** A verdict is MET only if all three trials
+hit the target as written.
+- **Criterion 1 is NOT EVALUABLE as written** — it names *my own* writing and
+  there is none. The revised version (same target, human writing with
+  checkable provenance) is MET, but it says nothing about modern or plain
+  writing: every passage is 19th-century literary prose.
+- **Criterion 2 is MET, but narrowly** (+0.237 against +0.20), and the gap
+  hides a weak AI side: only 3 of the 10 AI texts were labelled AI; the other 7
+  came back unsure. See diagnosis D1.
+- **Criterion 3 is MET, but the one "human" result came from AI text** — the
+  Claude-written pantry paragraph. Both genuinely human candidates (Thoreau,
+  Shelley) came back unsure. "Human" is reachable; the run doesn't show it's
+  reachable *for human writing*.
+- **Criteria 4 and 5 are MET** with nothing to qualify.
+
+No criterion was missed. Criteria 2 and 3 pass in ways that point at the same
+weakness the attack run found — diagnosed below.
 
 All three trials came out identical, to four decimal places. Signal one is
 GPT-2 in evaluation mode and signal two is plain arithmetic, so the same text
@@ -827,7 +845,91 @@ Criterion 4, trial 1 (first of five appeals, plus the 404 and 409) —
 
      Look for a pattern. Five failures on one signal is one problem, not five. -->
 
+Each diagnosis separates **Observed** (numbers from the audit log or the run
+reports), **Mechanism** (traced through the code and checked by recomputing
+the scores exactly) and **Hypothesis** (plausible, not yet tested). Raw style
+values were recomputed offline with the unchanged `stylometry.py`; they match
+the logged `style_score` for every case below.
 
+Seven broken attacks and two weak passes come down to **four problems**, not
+nine.
+
+**D1 — Signal two's vocabulary measure works backwards on these samples.**
+*Stage: signal two (`stylometry.type_token_ratio`), passed on by the
+combining rule.* Explains criterion 2's weak AI side, FP05, FP07, and why
+EV02/EV06 worked (D2).
+- *Observed:* vocabulary scored **0.00 on all 10 AI texts** in the criteria
+  run — their type-token ratios were 0.88–0.95, above the 0.80 "human" anchor.
+  The human Gutenberg passages scored *lower* variety (0.74–0.87). Vocabulary
+  pushed hard toward AI only on deliberately degenerate AI text (EV10's
+  repeated stanza, the "The system is good." test paragraphs) — and on two
+  pieces of **human** writing: FP05 (0.87, repeated technical terms) and FP07
+  (1.00, deliberate repetition). On natural AI prose it never fired.
+- *Mechanism:* with vocabulary stuck at 0, an AI paragraph's style score is
+  at most 0.5 × spread ≤ 0.5. A combined score above 0.65 then needs
+  `model_score` above 0.80 — which only 3 of the 10 AI texts reached. So 7
+  came back unsure, and the criterion 2 gap rests almost entirely on signal
+  one and on sentence spread.
+- *Hypothesis:* the starter's assumption ("AI repeats vocabulary") fits older
+  or degenerate generation; modern assistant prose uses broad, formal
+  vocabulary, while some human genres (documentation, rhetorical repetition)
+  repeat on purpose.
+
+**D2 — Sentence spread is the only working style measure, and it costs
+nothing to fake.** *Stage: signal two (`stylometry.sentence_length_spread`),
+then the combining rule.* Broke EV02 and EV06.
+- *Observed:* EV02 added one-word sentences ("Really.") — lengths
+  11, 1, 15, 1, 10, 1… — and EV06 put a 51-word sentence next to a 1-word one.
+  Spread variation rose to 0.85 and 1.19, past the 0.70 "human" anchor, so
+  spread scored **0.0**; with vocabulary already 0 (D1), `style_score` = **0.0**.
+- *Mechanism:* combined = 0.5 × model + 0.5 × 0 = half the model score. EV02's
+  model 0.594 became 0.297 and EV06's 0.573 became 0.286 — both **human**. A
+  style score of 0 halves whatever signal one says, so any AI text with
+  `model_score` below 0.70 can be pushed into "human" by adding short
+  sentences, without changing a word of content.
+
+**D3 — The short-text gate counts sentences by full stops.** *Stage: the
+route (`app.py::submit`, the `MIN_SENTENCES_TO_ASSESS` check), using
+`stylometry.sentences`.* Broke EV07.
+- *Observed:* EV07 is 97 words — over the 50-word minimum — but contains one
+  full stop and six semicolons, so `sentences()` finds **1** sentence, and the
+  route answered `insufficient_evidence` without scoring.
+- *Mechanism:* the gate is "fewer than 50 words **or** fewer than 3
+  sentences". The sentence half was meant to stop short texts being judged,
+  but it also lets a long text skip judgment entirely by joining sentences
+  with semicolons. This is a gap I introduced in Milestone 3, not a signal
+  failure.
+
+**D4 — Signal one rates plain, formulaic or repetitive human writing as
+predictable.** *Stage: signal one (`detector.model_signal`); D1 then adds to
+it.* Broke FP05 and FP07; FP02 and FP03 held only narrowly.
+- *Observed:* human texts scored high on signal one: FP05 documentation
+  **0.80**, FP07 repetition **0.88**, FP02 formal report 0.74, FP03 careful
+  non-native English **0.81**. FP05 was then pushed to 0.83 by a style score of
+  0.86 (spread 0.85, vocabulary 0.87); FP07 to 0.69 with style 0.5.
+- *Mechanism:* when both signals lean AI, the average can't correct either —
+  FP05 had nothing pulling it back. FP03 stayed unsure only because its
+  spread scored 0.74, not higher.
+- *Hypothesis:* predictable instructions ("set the port…, save the file…")
+  and phrases repeated within a text are exactly what GPT-2 predicts well —
+  the documented blind spot. Not yet tested by, for example, scoring the same
+  text with its repetition removed.
+
+**Single attacks:**
+- **EV01 (typos → human):** *Observed:* `model_score` **0.16** with style 0.5
+  (spread 1.0, vocabulary 0.0), combined 0.33. *Hypothesis:* the misspellings
+  are low-probability tokens that raised GPT-2's perplexity — the attack aimed
+  at signal two but hit signal one. Not confirmed: the unaltered text wasn't
+  scored on its own.
+- **EV05 (heavy human edit → human):** *Observed:* model 0.32, style 0.02,
+  combined 0.17. Both signals agree it reads as human; whether that's a failure
+  depends on whether a heavy rewrite *is* human writing. Ambiguous, not
+  diagnosed as a defect.
+- **RQ10, RQ11 (429 instead of 400):** not broken, but a design finding.
+  *Mechanism:* the rate-limit key falls back to the IP address when there's
+  no usable `creator_id`, and the limiter runs before validation, so five
+  earlier malformed requests used up the shared allowance. *Stage:* rate
+  limiting (`app.py::rate_limit_key`).
 
 ---
 
