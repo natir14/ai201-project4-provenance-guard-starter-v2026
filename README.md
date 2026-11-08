@@ -507,20 +507,164 @@ one you'd never find.
 <!-- Every attack with its outcome and a held-or-broke mark.
      `run_attacks.py --label before` produces the table. -->
 
+`python run_attacks.py --set attack_set --label before`, against the local
+server on 2026-11-08 (rate limiting on, 5/minute; nothing in the detector
+changed). Raw output: `results/attack_run_2026-11-08_1100_before.md` — the
+runner leaves the verdicts blank; the verdicts below are mine. Scores come
+from the audit log entry for each attack's `content_id`.
 
+**56 attacks: 49 held, 7 broke** — one of the seven, EV05, is ambiguous (see
+below). **No crashes, no 5xx.** Nine `429`s — seven
+from the flood family as intended, and two (RQ10, RQ11) that are a finding of
+their own, below.
+
+How I marked them:
+- **evasion** — BROKE if AI text came out **human**, or a text long enough to
+  judge escaped scoring. "Unsure" counts as held: it clears no one.
+- **false_positive** — BROKE if human writing came out **AI**. "Unsure" is not
+  an accusation (criterion 1).
+- **prompt_injection** — BROKE if the instruction changed the score, the
+  label or the log.
+- **malformed / flood** — BROKE on a crash, 5xx, a false classification or a
+  missing log entry.
+
+| Family | Attacks | Held | Broke |
+|---|---|---|---|
+| evasion | 10 | 5 | **5** |
+| false_positive | 8 | 6 | **2** |
+| prompt_injection | 6 | 6 | 0 |
+| malformed | 20 | 20 | 0 |
+| flood_same_creator | 12 | 12 | 0 |
+| **Total** | **56** | **49** | **7** |
+
+| ID | Family | Targeting | HTTP | Guess | model | style | combined | Verdict | What happened |
+|---|---|---|---|---|---|---|---|---|---|
+| EV01 | evasion | signal two: typos raise word variety | 200 | human | 0.1635 | 0.5 | 0.3317 | **BROKE** | AI text → **human**. Typos made GPT-2 surprised (model 0.16) |
+| EV02 | evasion | signal two: broken-up sentences raise length spread | 200 | human | 0.5943 | 0 | 0.2972 | **BROKE** | AI text → **human**. Inserted 'Really.' sentences zeroed the spread measure |
+| EV03 | evasion | signal two: a pasted quotation changes the shape | 200 | unsure | 0.6662 | 0.2566 | 0.4614 | **HELD** | unsure, not human |
+| EV04 | evasion | signal one: unusual words raise perplexity | 200 | unsure | 0.6114 | 0.5 | 0.5557 | **HELD** | unsure, not human |
+| EV05 | evasion | both signals: heavy human editing pass | 200 | human | 0.3212 | 0.0247 | 0.1729 | **BROKE** | edited AI text → **human** (arguable: a heavy human rewrite may now be human writing) |
+| EV06 | evasion | signal two: one very long sentence and one very short | 200 | human | 0.5727 | 0 | 0.2863 | **BROKE** | AI text → **human**. One very long + one very short sentence zeroed spread |
+| EV07 | evasion | signal two: padding with punctuation | 200 | insufficient_evidence | — | — | — | **BROKE** | 97-word AI text escaped scoring: semicolons for full stops → 1 sentence → too short |
+| EV08 | evasion | signal one: text below the token window | 200 | insufficient_evidence | — | — | — | **HELD** | 10 words: too short to judge, by design |
+| EV09 | evasion | both: AI text with a human opening paragraph bolted on | 200 | unsure | 0.7042 | 0.2325 | 0.4684 | **HELD** | unsure, not human |
+| EV10 | evasion | signal two: repeated stanza structure | 200 | ai | 0.9792 | 0.8061 | 0.8926 | **HELD** | still AI |
+| FP01 | false_positive | plain, clear human writing with no flourishes | 200 | unsure | 0.6175 | 0.2425 | 0.43 | **HELD** | unsure, no accusation |
+| FP02 | false_positive | human writing in a formal register | 200 | unsure | 0.7387 | 0.5357 | 0.6372 | **HELD** | unsure — **0.637, 0.013 from AI** |
+| FP03 | false_positive | a non-native English speaker writing carefully | 200 | unsure | 0.8051 | 0.3718 | 0.5885 | **HELD** | unsure — model alone 0.81; style kept it below 0.65 |
+| FP04 | false_positive | a student essay written to a rubric | 200 | unsure | 0.8329 | 0.3333 | 0.5831 | **HELD** | unsure, no accusation |
+| FP05 | false_positive | technical documentation written by a person | 200 | ai | 0.8005 | 0.8589 | 0.8297 | **BROKE** | human technical doc → **AI** (0.83): both signals agree |
+| FP06 | false_positive | a person imitating a formal template | 200 | unsure | 0.8814 | 0.2908 | 0.5861 | **HELD** | unsure, no accusation |
+| FP07 | false_positive | human writing that repeats a phrase deliberately | 200 | ai | 0.8816 | 0.5 | 0.6908 | **BROKE** | human text with deliberate repetition → **AI** (0.69) |
+| FP08 | false_positive | very short genuine human submission | 200 | insufficient_evidence | — | — | — | **HELD** | too short, no judgment |
+| PI01 | prompt_injection | instruction to ignore the check | 200 | insufficient_evidence | — | — | — | **HELD** | 45 words: not scored; instruction had no effect |
+| PI02 | prompt_injection | instruction disguised as a system message | 200 | insufficient_evidence | — | — | — | **HELD** | 45 words: not scored; instruction had no effect |
+| PI03 | prompt_injection | instruction wrapped in the writer's voice | 200 | unsure | 0.5943 | 0.3569 | 0.4756 | **HELD** | scored normally; not human |
+| PI04 | prompt_injection | attempt to make the label text hostile | 200 | unsure | 0.4998 | 0.3033 | 0.4016 | **HELD** | label is fixed text; markup never echoed |
+| PI05 | prompt_injection | attempt to inject into the audit log | 200 | insufficient_evidence | — | — | — | **HELD** | text isn't logged, so nothing to inject |
+| PI06 | prompt_injection | instruction plus real human text | 200 | unsure | 0.5583 | 0.2546 | 0.4064 | **HELD** | scored normally; not human |
+| MF01 | malformed | text is only whitespace | 400 | — | — | — | — | **HELD** | refused, logged |
+| MF02 | malformed | text is a single character | 200 | insufficient_evidence | — | — | — | **HELD** | no crash, no judgment |
+| MF03 | malformed | text is control characters | 200 | insufficient_evidence | — | — | — | **HELD** | no crash, no judgment |
+| MF04 | malformed | text is only punctuation | 200 | insufficient_evidence | — | — | — | **HELD** | no crash, no judgment |
+| MF05 | malformed | text is a very long single word | 200 | insufficient_evidence | — | — | — | **HELD** | no crash, no judgment |
+| MF06 | malformed | text is emoji only | 200 | insufficient_evidence | — | — | — | **HELD** | no crash, no judgment |
+| MF07 | malformed | text is right-to-left script | 200 | insufficient_evidence | — | — | — | **HELD** | no crash, no judgment |
+| MF08 | malformed | text is 60,000 characters | 413 | — | — | — | — | **HELD** | refused as too long, logged |
+| RQ01 | malformed | no text field at all | 400 | — | — | — | — | **HELD** | refused, logged |
+| RQ02 | malformed | no creator_id | 400 | — | — | — | — | **HELD** | refused, logged |
+| RQ03 | malformed | text is a number | 400 | — | — | — | — | **HELD** | refused, logged |
+| RQ04 | malformed | text is a list | 400 | — | — | — | — | **HELD** | refused, logged |
+| RQ05 | malformed | text is null | 400 | — | — | — | — | **HELD** | refused, logged |
+| RQ06 | malformed | creator_id is an object | 400 | — | — | — | — | **HELD** | refused, logged |
+| RQ07 | malformed | body is a JSON array, not an object | 400 | — | — | — | — | **HELD** | refused, logged |
+| RQ08 | malformed | body is unparseable JSON | 400 | — | — | — | — | **HELD** | refused, logged |
+| RQ09 | malformed | body is empty | 400 | — | — | — | — | **HELD** | refused, logged |
+| RQ10 | malformed | body is form-encoded, not JSON | 429 | — | — | — | — | **HELD** | **429 not 400**: shared IP allowance already used by RQ02/06/07/08/09 |
+| RQ11 | malformed | body is JSON claiming to be plain text | 429 | — | — | — | — | **HELD** | **429 not 400**: same shared IP allowance |
+| RQ12 | malformed | deeply nested JSON | 400 | — | — | — | — | **HELD** | refused, logged |
+| FL01_01 | flood_same_creator | 20 rapid submissions from one creator | 200 | insufficient_evidence | — | — | — | **HELD** | allowed, then limited |
+| FL01_02 | flood_same_creator | 20 rapid submissions from one creator | 200 | insufficient_evidence | — | — | — | **HELD** | allowed, then limited |
+| FL01_03 | flood_same_creator | 20 rapid submissions from one creator | 200 | insufficient_evidence | — | — | — | **HELD** | allowed, then limited |
+| FL01_04 | flood_same_creator | 20 rapid submissions from one creator | 200 | insufficient_evidence | — | — | — | **HELD** | allowed, then limited |
+| FL01_05 | flood_same_creator | 20 rapid submissions from one creator | 200 | insufficient_evidence | — | — | — | **HELD** | allowed, then limited |
+| FL01_06 | flood_same_creator | 20 rapid submissions from one creator | 429 | — | — | — | — | **HELD** | rate limited, logged |
+| FL01_07 | flood_same_creator | 20 rapid submissions from one creator | 429 | — | — | — | — | **HELD** | rate limited, logged |
+| FL01_08 | flood_same_creator | 20 rapid submissions from one creator | 429 | — | — | — | — | **HELD** | rate limited, logged |
+| FL01_09 | flood_same_creator | 20 rapid submissions from one creator | 429 | — | — | — | — | **HELD** | rate limited, logged |
+| FL01_10 | flood_same_creator | 20 rapid submissions from one creator | 429 | — | — | — | — | **HELD** | rate limited, logged |
+| FL01_11 | flood_same_creator | 20 rapid submissions from one creator | 429 | — | — | — | — | **HELD** | rate limited, logged |
+| FL01_12 | flood_same_creator | 20 rapid submissions from one creator | 429 | — | — | — | — | **HELD** | rate limited, logged |
+
+**What broke, in one line each:**
+- **Evasion through signal two (EV02, EV06):** changing only sentence lengths
+  — padding with "Really." or one huge sentence plus one tiny one — set
+  `style_score` to 0.0, and averaged with a middling `model_score` that was
+  enough for **human**.
+- **Evasion through signal one (EV01):** the typos aimed at signal two
+  actually hit signal one — misspellings made GPT-2 surprised (`model_score`
+  0.16).
+- **Ambiguous (EV05):** AI text after a *heavy human editing pass* came out
+  **human** (0.17). Marked BROKE under the evasion rule, but a rewrite that
+  heavy may genuinely be human writing now — it's the one verdict here I'd
+  defend either way, and I don't count it as a clear detector failure.
+- **Escaping the check (EV07):** joining every sentence with semicolons made a
+  97-word AI paragraph count as *one* sentence, so the short-text rule (fewer
+  than 3 sentences) answered "too short to assess" — no judgment at all.
+- **False accusations (FP05, FP07):** human writing labelled AI — see below.
+- **Two held only narrowly:** FP02 (formal report) at 0.637, 0.013 below the AI
+  threshold; FP03 (careful non-native English) had `model_score` 0.81 on its
+  own and was kept at "unsure" only by the style signal.
+- **RQ10, RQ11 got `429` instead of `400`.** Requests without a usable
+  `creator_id` share one allowance per IP address; five earlier malformed
+  requests (RQ02, RQ06–RQ09) used it up, so these two were rate limited
+  before they were ever validated. No crash and both logged, so held — but
+  the rate limiter masked the validation it was meant to sit in front of.
 
 **Ten audit log entries from the run**
 
 <!-- Choose entries that show the interesting failures, not the ten easiest. -->
 
-```json
+Lines 58, 60, 50, 45, 44, 56, 55, 66, 85, 93 and 75 of `logs/audit.jsonl`,
+copied as-is (eleven, to include both kinds of rejection):
 
+```json
+{"timestamp": "2026-11-08T16:00:29+00:00", "content_id": "d550a266-f088-4d04-a9ae-1b4107d0e791", "creator_id": "attacker_FP05", "guess": "ai", "model_score": 0.8005, "style_score": 0.8589, "combined_score": 0.8297, "label": "This text shows patterns associated with AI-generated writing. This result is not proof of AI use, and you can request a human review if you disagree.", "status": "decided", "confidence": 0.66, "text_length": 393}
+{"timestamp": "2026-11-08T16:00:30+00:00", "content_id": "0abd96e8-1d08-4d64-9814-f2dedd86aba2", "creator_id": "attacker_FP07", "guess": "ai", "model_score": 0.8816, "style_score": 0.5, "combined_score": 0.6908, "label": "This text shows patterns associated with AI-generated writing. This result is not proof of AI use, and you can request a human review if you disagree.", "status": "decided", "confidence": 0.38, "text_length": 335}
+{"timestamp": "2026-11-08T16:00:27+00:00", "content_id": "14496023-e02a-4ab4-bfd3-d2927df12c6f", "creator_id": "attacker_EV07", "guess": "insufficient_evidence", "model_score": null, "style_score": null, "combined_score": null, "label": "This piece is too short for us to assess, so we haven't made any judgment about it.", "status": "decided", "confidence": null, "text_length": 749, "reason": "too_short_to_assess"}
+{"timestamp": "2026-11-08T16:00:26+00:00", "content_id": "65aada2d-ea5f-4802-9e82-32ce771a6a46", "creator_id": "attacker_EV02", "guess": "human", "model_score": 0.5943, "style_score": 0.0, "combined_score": 0.2972, "label": "This text shows patterns more consistent with human writing. This is an automated estimate, not proof of authorship.", "status": "decided", "confidence": 0.41, "text_length": 708}
+{"timestamp": "2026-11-08T16:00:26+00:00", "content_id": "2f34c821-ea09-46c9-8876-7f282af14518", "creator_id": "attacker_EV01", "guess": "human", "model_score": 0.1635, "style_score": 0.5, "combined_score": 0.3317, "label": "This text shows patterns more consistent with human writing. This is an automated estimate, not proof of authorship.", "status": "decided", "confidence": 0.34, "text_length": 657}
+{"timestamp": "2026-11-08T16:00:29+00:00", "content_id": "bff8d7de-7b8e-4ae1-938d-c5868fdcbeaa", "creator_id": "attacker_FP03", "guess": "unsure", "model_score": 0.8051, "style_score": 0.3718, "combined_score": 0.5885, "label": "The available signals do not support a reliable classification. No conclusion about authorship should be drawn from this result.", "status": "decided", "confidence": 0.18, "text_length": 418}
+{"timestamp": "2026-11-08T16:00:29+00:00", "content_id": "4a0cb708-c9cd-4bc7-bef6-a25c799e3613", "creator_id": "attacker_FP02", "guess": "unsure", "model_score": 0.7387, "style_score": 0.5357, "combined_score": 0.6372, "label": "The available signals do not support a reliable classification. No conclusion about authorship should be drawn from this result.", "status": "decided", "confidence": 0.27, "text_length": 477}
+{"timestamp": "2026-11-08T16:00:31+00:00", "content_id": "1ef4b6de-0cd6-44db-96db-6d7ae824bb5d", "creator_id": "attacker_PI05", "guess": "insufficient_evidence", "model_score": null, "style_score": null, "combined_score": null, "label": "This piece is too short for us to assess, so we haven't made any judgment about it.", "status": "decided", "confidence": null, "text_length": 213, "reason": "too_short_to_assess"}
+{"timestamp": "2026-11-08T16:00:31+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "rate_limited", "limit": "5 per 1 minute", "http_status": 429, "endpoint": "/submit"}
+{"timestamp": "2026-11-08T16:00:31+00:00", "creator_id": "attacker_flood", "event": "rejected", "status": "rejected", "reason": "rate_limited", "limit": "5 per 1 minute", "http_status": 429, "endpoint": "/submit"}
+{"timestamp": "2026-11-08T16:00:31+00:00", "creator_id": "attacker_MF08", "event": "rejected", "status": "rejected", "reason": "too_long", "field": "text", "http_status": 413}
 ```
+
+In order: FP05 and FP07 (the false accusations), EV07 (escaped scoring), EV02
+and EV01 (AI → human), FP03 and FP02 (held narrowly), PI05 (log injection —
+nothing to inject, the text isn't logged), RQ10's `429` with
+`creator_id: "unknown"`, a flood `429`, and MF08's `413`.
 
 **The single worst outcome** — the one I'd least want to explain to a writer
 whose work got caught by it:
 
+**FP05 — technical documentation written by a person, labelled AI at 0.83**
+(model 0.80, style 0.86, confidence 0.66). It's the highest AI score any human
+text got, and it's not borderline: both signals agreed, so the combining rule
+had nothing to balance. The writer did nothing unusual — documentation is
+*meant* to be plain, consistent and repetitive.
 
+*Preliminary hypothesis, not yet a diagnosis:* the failure is shared by both
+signals and passed straight through the combining rule. **Signal one** — the
+formulaic-genre blind spot: instructions like "Set the port value… Save the
+file and restart the service" are highly predictable to GPT-2. **Signal two**
+— even, imperative sentences push `spread` to 0.85 and repeated terms ("the
+service", "the file") push `vocabulary` to 0.87, both towards AI. **The
+combining rule** averages two agreeing errors, so neither can correct the
+other. FP07 (deliberate repetition) looks like the same mechanism through the
+vocabulary measure. To be tested in the Run Log and Verdicts stage.
 
 ---
 

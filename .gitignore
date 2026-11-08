@@ -17,6 +17,10 @@ models/
 .DS_Store
 Thumbs.db
 
+# The instructor's attack set — kept locally for re-runs, not published.
+attack_set.zip
+attack_set/
+
 # NOTE: logs/ and results/ are deliberately NOT ignored. Your audit log and
 # your attack runs are evidence, and they're part of what gets graded.
 # Commit them.
